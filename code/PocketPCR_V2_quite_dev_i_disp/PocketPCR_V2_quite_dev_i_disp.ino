@@ -16,7 +16,7 @@ https://github.com/GaudiLabs/PocketPCR
 
 #include <Fonts/FreeSans9pt7b.h>
 
-const char VersionString[] = "Spikehole 0.0.5b";   // fork of GaudiLabs PocketPCR V1.02 2020
+const char VersionString[] = "Spikehole 0.0.6b";   // fork of GaudiLabs PocketPCR V1.02 2020
 #define SPLASH_MS 5000                         // how long the start-up splash is shown
 
 // These constants won't change. They're used to give names to the pins used:
@@ -60,6 +60,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT,
 #define CASE_Error 6
 #define CASE_Config 7
 #define CASE_Debug 8
+#define CASE_Paused 9
 
 // Safety cutoff
 #define ADC_MIN 20            // raw ADC at/below this: thermistor shorted
@@ -100,6 +101,9 @@ int SETTING_cycles = 20;
 typedef struct {
 int value[SETTING_Size*2];
 int tdStart;          // touchdown: anneal START temp (value[4] is the anneal END temp)
+int pauseFirst;       // sqPCR only: first pause (baseline) after Extension of this cycle
+int pauseSecond;      // sqPCR only: second pause cycle (<= first = none)
+int pauseEvery;       // sqPCR only: then every N cycles after the second (adjustable on the pause screen)
 } EEprom;
 
 // Touchdown PCR: anneal starts at tdStart and drops TD_STEP °C per cycle until it reaches value[4],
@@ -111,6 +115,7 @@ int annealPhase = 0;      // editing the Annealing temp: 0 = start, 1 = end
 bool tdLinked = false;    // touchdown was off when editing began: end follows start
 
 FlashStorage(my_flash_store, EEprom);
+FlashStorage(sqpcr_store, EEprom);      // sqPCR program: same layout as PCR + pause fields
 
 // Measured ramp statistics, kept in flash across power cycles (reset by a firmware upload).
 // Saved once per run (when it ends) to spare the flash. Used for the time-left estimate and for tuning.
@@ -139,11 +144,24 @@ uint32_t runHeatN = 0, runCoolN = 0;
 float runHeatSecs = 0, runCoolSecs = 0, runHeatDeg = 0, runCoolDeg = 0;
 uint32_t runTotalSecs = 0;
 uint32_t estAtStart = 0;
-EEprom settings;
+EEprom settings;    // PCR program
+EEprom sqsettings;   // sqPCR program
 
-// Program types. PCR uses `settings` (GaudiLabs layout), RT uses its own store.
+// Program types. PCR uses `settings` (GaudiLabs layout), sqPCR `sqsettings`, RT its own store.
 #define RUN_PCR 0
 #define RUN_RT 1
+#define RUN_SQPCR 2
+
+// sqPCR manual-reading pauses: after Extension of nextPauseCycle the run holds at the Extension temp
+#define PAUSE_MAX_N 9       // pause numbers (first, second, every, Resume [N]) are single digits
+int nextPauseCycle = 0;     // 0 = no more pauses
+int pauseN = 5;             // cycles to the next pause (Resume [N])
+int userN = 0;              // N the user set on the pause screen this run (0 = follow the schedule)
+int pauseNshown = 0;        // N when editing began (to detect a change)
+int pauseSel = 0;           // pause screen selection
+bool pauseEditing = false;  // editing N on the pause screen
+unsigned long pauseStartMs = 0, pausedMs = 0;
+int pauseCount = 0;
 int runType = RUN_PCR;     // program being run
 int editType = RUN_PCR;    // program being edited in Config
 
@@ -175,7 +193,7 @@ float sensorVoltage =0;
 boolean editMode = false;
 boolean minuteMode = false;
 
-int counter = 0;        
+volatile int counter = 0;   // changed by the encoder interrupt (rotate())
 int counter_save = 0;      
 
 int x=0;
@@ -282,11 +300,24 @@ settings.tdStart = TD_START_DEFAULT;                //   (TD_START_DEFAULT = 63)
 settings.value[6] = 72;  settings.value[7] = 30;    // Extension: 72 °C, 30 s
 settings.value[8] = 72;  settings.value[9] = 300;   // Final extension: 72 °C, 5 min
 settings.value[10] = 35;                            // total cycles (touchdown included)
+settings.pauseFirst = 1; settings.pauseSecond = 6; settings.pauseEvery = 3;  // unused for PCR
 
 settings.value[11]=1;
 my_flash_store.write(settings);
 
   };
+
+sqsettings=sqpcr_store.read();
+if (sqsettings.value[11]==0)           // first boot after upload: default sqPCR program (PCR + pauses)
+{
+sqsettings = settings;                 // same steps / touchdown as the PCR defaults...
+sqsettings.value[10] = 40;             // ...40 cycles total
+sqsettings.pauseFirst = 1;             // baseline reading after the first Extension (same temp/chemistry as later reads)
+sqsettings.pauseSecond = 6;            // second reading after cycle 6
+sqsettings.pauseEvery = 3;             // then every 3 cycles (transitions span ~6-7 cycles, so 2-3 points in it)
+sqsettings.value[11]=1;
+sqpcr_store.write(sqsettings);
+}
   
 }
 
@@ -322,14 +353,13 @@ switch (caseUX) {
 
 case CASE_Main:
 
-   if (counter>2) counter=0;
-   if (counter<0) counter=2;
+   if (counter>3) counter=0;
+   if (counter<0) counter=3;
    MenuItem = counter;
    draw_main_display();
 
    if (!digitalRead(butPin)) {waitRelease();
-     if (MenuItem==0) startRun(RUN_PCR);
-     else if (MenuItem==1) startRun(RUN_RT);
+     if (MenuItem<3) startRun(menuType(MenuItem));      // Run PCR / Run sqPCR / Run RT
      else {caseUX=CASE_Config; counter=0;}
    }
 
@@ -337,14 +367,14 @@ case CASE_Main:
 
 case CASE_Config:
   {
-    if (counter>3) counter=0;
-    if (counter<0) counter=3;
+    if (counter>4) counter=0;
+    if (counter<0) counter=4;
     int item = counter;
     draw_config_display(item);
     if (!digitalRead(butPin)) {waitRelease();
-      if (item==0 || item==1) {editType = (item==0) ? RUN_PCR : RUN_RT; caseUX=CASE_Settings; counter=0;}
-      else if (item==2) {caseUX=CASE_Debug; counter=0;}
-      else {caseUX=CASE_Main; counter=2;}
+      if (item<3) {editType = menuType(item); caseUX=CASE_Settings; counter=0;}   // PCR / sqPCR / RT program
+      else if (item==3) {caseUX=CASE_Debug; counter=0;}
+      else {caseUX=CASE_Main; counter=3;}
     }
   }
     break;
@@ -354,7 +384,7 @@ case CASE_Debug:
     if (counter>2) counter=0;
     if (counter<0) counter=2;
     draw_debug_display(counter);
-    if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Config; counter=2;}
+    if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Config; counter=3;}
 
     break;
 
@@ -365,14 +395,18 @@ case CASE_Settings:
     if (counter>last+2) counter=0;
     if (counter<0) counter=last+2;
     MenuItem = counter;
-    if ((MenuItem<=last)&&(MenuItem%2==1)&&(ev[MenuItem]>90)) minuteMode=true; else minuteMode=false;
+    if ((MenuItem<=last)&&(MenuItem%2==1)&&!(pcrLike(editType)&&(MenuItem>=10))&&(ev[MenuItem]>90)) minuteMode=true; else minuteMode=false;
     if (!digitalRead(butPin))
     {waitRelease(); caseUX=CASE_EditSettings;
      if (MenuItem<=last) {                       // last+1 / last+2 = Set / Cancel, no value
        if (isAnnealItem()) {                     // touchdown-aware: edit the start first
-         annealPhase=0; tdLinked=!tdOn();
-         counter = tdOn() ? settings.tdStart : ((settings.value[4]==TEMP_ROOM) ? 25 : settings.value[4]);
+         EEprom &P = prog(editType);
+         annealPhase=0; tdLinked=!tdOn(editType) && (P.value[4]!=TEMP_ROOM);   // a Room end stays Room
+         counter = tdLinked ? P.value[4] : P.tdStart;
        }
+       else if ((editType==RUN_SQPCR)&&(MenuItem==11)) counter=sqsettings.pauseFirst;
+       else if ((editType==RUN_SQPCR)&&(MenuItem==12)) counter=sqsettings.pauseSecond;
+       else if ((editType==RUN_SQPCR)&&(MenuItem==13)) counter=sqsettings.pauseEvery;
        else if (isTempItem(editType,MenuItem)) counter = (ev[MenuItem]==TEMP_ROOM) ? TEMP_ROOM_COUNTER : ev[MenuItem];
        else if (minuteMode) counter=ev[MenuItem]/60; else counter=ev[MenuItem];
      }
@@ -387,29 +421,34 @@ case CASE_EditSettings:
     int last = lastValItem(editType);
 
     if (MenuItem==last+1) {                      // Set: save and back to Config
-      if (editType==RUN_RT) rt_store.write(rtprog); else my_flash_store.write(settings);
-      caseUX=CASE_Config; counter=editType; break;
+      if (editType==RUN_RT) rt_store.write(rtprog);
+      else if (editType==RUN_SQPCR) sqpcr_store.write(sqsettings);
+      else my_flash_store.write(settings);
+      caseUX=CASE_Config; counter=typeMenuIndex(editType); break;
     }
     if (MenuItem==last+2) {                      // Cancel: reload and back to Config
-      if (editType==RUN_RT) rtprog=rt_store.read(); else settings=my_flash_store.read();
-      caseUX=CASE_Config; counter=editType; break;
+      if (editType==RUN_RT) rtprog=rt_store.read();
+      else if (editType==RUN_SQPCR) sqsettings=sqpcr_store.read();
+      else settings=my_flash_store.read();
+      caseUX=CASE_Config; counter=typeMenuIndex(editType); break;
     }
 
     if (isAnnealItem()) {
+      EEprom &P = prog(editType);
       if (annealPhase==0) {                                          // start: 25..99
         if (counter<25) counter=25;
         if (counter>99) counter=99;
-        settings.tdStart=counter;
-        if (tdLinked) settings.value[4]=counter;                     // touchdown off: end follows start
-        else if ((settings.value[4]!=TEMP_ROOM)&&(settings.value[4]>counter)) settings.value[4]=counter;
-        if (settings.value[10]<minCycles()) settings.value[10]=minCycles();   // touchdown needs more cycles
+        P.tdStart=counter;
+        if (tdLinked) P.value[4]=counter;                            // touchdown off: end follows start
+        else if ((P.value[4]!=TEMP_ROOM)&&(P.value[4]>counter)) P.value[4]=counter;
+        if (P.value[10]<minCycles(editType)) P.value[10]=minCycles(editType);   // touchdown needs more cycles
         if (!digitalRead(butPin)) {waitRelease(); annealPhase=1;
-          counter=(settings.value[4]==TEMP_ROOM) ? TEMP_ROOM_COUNTER : settings.value[4];}
+          counter=(P.value[4]==TEMP_ROOM) ? TEMP_ROOM_COUNTER : P.value[4];}
       } else {                                                       // end: Room..start
         if (counter<TEMP_ROOM_COUNTER) counter=TEMP_ROOM_COUNTER;
-        if (counter>settings.tdStart) counter=settings.tdStart;
-        settings.value[4] = (counter==TEMP_ROOM_COUNTER) ? TEMP_ROOM : counter;
-        if (settings.value[10]<minCycles()) settings.value[10]=minCycles();   // touchdown needs more cycles
+        if (counter>P.tdStart) counter=P.tdStart;
+        P.value[4] = (counter==TEMP_ROOM_COUNTER) ? TEMP_ROOM : counter;
+        if (P.value[10]<minCycles(editType)) P.value[10]=minCycles(editType);   // touchdown needs more cycles
         if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Settings; counter=MenuItem;}
       }
       draw_setup_display();
@@ -420,10 +459,26 @@ case CASE_EditSettings:
        {if (counter<TEMP_ROOM_COUNTER) counter=TEMP_ROOM_COUNTER;   // 24 = Room
         if (counter>99) counter=99;
         ev[MenuItem] = (counter==TEMP_ROOM_COUNTER) ? TEMP_ROOM : counter;}
-    else if ((editType==RUN_PCR)&&(MenuItem==10))                   // PCR cycle count (total, touchdown included)
-       {if (counter<minCycles()) counter=minCycles();                // never shorter than a full touchdown
+    else if (pcrLike(editType)&&(MenuItem==10))                     // cycle count (total, touchdown included)
+       {if (counter<minCycles(editType)) counter=minCycles(editType);  // never shorter than a full touchdown
         if (counter>99) counter=99;
-        ev[MenuItem]=counter;}
+        ev[MenuItem]=counter;
+        if (editType==RUN_SQPCR) clampPauses();}
+    else if ((editType==RUN_SQPCR)&&(MenuItem==11))                   // sqPCR: first (baseline) pause cycle
+       {if (counter<1) counter=1;
+        if (counter>PAUSE_MAX_N-1) counter=PAUSE_MAX_N-1;         // leave room for a later second pause
+        if (counter>sqsettings.value[10]) counter=sqsettings.value[10];
+        sqsettings.pauseFirst=counter;
+        clampPauses();}
+    else if ((editType==RUN_SQPCR)&&(MenuItem==12))                   // sqPCR: second pause cycle (after first)
+       {if (counter<=sqsettings.pauseFirst) counter=sqsettings.pauseFirst+1;
+        if (counter>PAUSE_MAX_N) counter=PAUSE_MAX_N;
+        if (counter>sqsettings.value[10]) counter=sqsettings.value[10];
+        sqsettings.pauseSecond=counter;}
+    else if ((editType==RUN_SQPCR)&&(MenuItem==13))                   // sqPCR: then every N cycles
+       {if (counter<1) counter=1;
+        if (counter>PAUSE_MAX_N) counter=PAUSE_MAX_N;
+        sqsettings.pauseEvery=counter;}
     else                                                             // time
       {if (minuteMode)
        {if (counter<2) {minuteMode=false; counter=90;}
@@ -443,19 +498,7 @@ case CASE_EditSettings:
 
 case CASE_Run:
 
-  TEMPdif=TEMPset-temperature_mean;
-  TEMPi=TEMPi+(TEMPset-temperature_mean);
-  
-  if (millis()-TEMPclick>200) {
-  TEMPclick=millis();
-  TEMPd=TEMPdif_a[4]-TEMPdif;
-  TEMPdif_a[4]=TEMPdif_a[3];
-  TEMPdif_a[3]=TEMPdif_a[2];
-  TEMPdif_a[2]=TEMPdif_a[1];
-  TEMPdif_a[1]=TEMPdif_a[0];
-  TEMPdif_a[0]=TEMPdif;
-  //  Serial.println (TEMPd);
-  }
+  updatePIDTerms();
   
     switch (casePCR) {
 
@@ -489,15 +532,11 @@ case CASE_Run:
     draw_run_display();
 
     if ((TIMEcontrol<=0)&&(caseUX==CASE_Run)) {
-      int cyc=PCRcycle;
-      int nx=nextStep(PCRstate,cyc);
-      if (nx<0) {
-        caseUX=CASE_Done;
-        runCompleted=true;
-        stats.runsCompleted++;
-        stats.lastEstSecs=estAtStart;
-        stats.lastActualSecs=(millis()-runStart)/1000;
-      } else {PCRstate=nx; PCRcycle=cyc; casePCR=PCR_set;}
+      if ((runType==RUN_SQPCR)&&(PCRstate==3)&&(nextPauseCycle>0)&&(PCRcycle==nextPauseCycle)) {
+        enterPause();                               // sqPCR reading: hold at Extension temp
+        break;
+      }
+      advanceStep();
     }
     break;
 
@@ -524,7 +563,7 @@ case CASE_Done:
     coolStart = millis();
     coolSampleTime = millis();
     coolRef = temperature_mean;
-    runTotalSecs = (millis()-runStart)/1000;
+    runTotalSecs = (millis()-runStart-pausedMs)/1000;   // excludes sqPCR reading pauses
     stats_store.write(stats);    // one flash write per run (finished or stopped)
     printStats();
   }
@@ -541,7 +580,35 @@ case CASE_Done:
     draw_done_display();
 
 
-if (!digitalRead(butPin)) {waitRelease(); coolActive=false; caseUX=CASE_Main; counter=runType;}
+if (!digitalRead(butPin)) {waitRelease(); coolActive=false; caseUX=CASE_Main; counter=typeMenuIndex(runType);}
+
+break;
+
+case CASE_Paused:
+
+  // sqPCR reading pause: keep holding the Extension temperature
+  updatePIDTerms();
+  runPID();
+
+  if (pauseEditing) {                       // editing Resume [N]: press resumes
+    if (counter<1) counter=1;
+    if (counter>PAUSE_MAX_N) counter=PAUSE_MAX_N;
+    pauseN=counter;
+    if (!digitalRead(butPin)) {waitRelease(); pauseEditing=false;
+      if (counter!=pauseNshown) userN=pauseN;               // user changed it: keep it for this run
+      resumeRun(PCRcycle+pauseN);}
+  } else {
+    if (counter>2) counter=0;
+    if (counter<0) counter=2;
+    pauseSel=counter;
+    if (!digitalRead(butPin)) {waitRelease();
+      if (pauseSel==0) {pauseEditing=true; counter=pauseN; pauseNshown=pauseN;}  // Resume [N]: press to edit, press again to go
+      else if (pauseSel==1) resumeRun(0);                         // no more pauses
+      else {pausedMs+=millis()-pauseStartMs; caseUX=CASE_Done; counter=0;   // Stop run
+            Serial.println("STOP during pause");}
+    }
+  }
+  if (caseUX==CASE_Paused) draw_pause_display();
 
 break;
 
@@ -643,10 +710,14 @@ void draw_setup_display()
     // centred, max 21 chars (e.g. "Incubation Temp. [°C]")
     char hdr[24];
     const char* nm = stepName(editType, MenuItem/2);
-    if ((editType==RUN_PCR)&&(MenuItem==10)) snprintf(hdr, sizeof(hdr), "No of cycles");
+    EEprom &P = prog(editType);
+    if (pcrLike(editType)&&(MenuItem==10)) snprintf(hdr, sizeof(hdr), "No of cycles");
+    else if ((editType==RUN_SQPCR)&&(MenuItem==11)) snprintf(hdr, sizeof(hdr), "First pause: cycle %d", sqsettings.pauseFirst);
+    else if ((editType==RUN_SQPCR)&&(MenuItem==12)) snprintf(hdr, sizeof(hdr), "Second pause: cycle %d", sqsettings.pauseSecond);
+    else if ((editType==RUN_SQPCR)&&(MenuItem==13)) snprintf(hdr, sizeof(hdr), "Then every %d cycle%s", sqsettings.pauseEvery, sqsettings.pauseEvery==1 ? "" : "s");
     else if (isAnnealItem() && editing && annealPhase==0) snprintf(hdr, sizeof(hdr), "Anneal start [\xA7""C]");
-    else if (isAnnealItem() && editing) snprintf(hdr, sizeof(hdr), (settings.value[4]==TEMP_ROOM) ? "Anneal end [RT]" : "Anneal end [\xA7""C]");
-    else if (isAnnealItem() && tdOn()) snprintf(hdr, sizeof(hdr), "Annealing %d>%d [\xA7""C]", settings.tdStart, settings.value[4]);
+    else if (isAnnealItem() && editing) snprintf(hdr, sizeof(hdr), (P.value[4]==TEMP_ROOM) ? "Anneal end [RT]" : "Anneal end [\xA7""C]");
+    else if (isAnnealItem() && tdOn(editType)) snprintf(hdr, sizeof(hdr), "Annealing %d>%d [\xA7""C]", P.tdStart, P.value[4]);
     else if (MenuItem%2==0) {
       if (ev[MenuItem]==TEMP_ROOM) snprintf(hdr, sizeof(hdr), "%s Temp. [RT]", nm);
       else snprintf(hdr, sizeof(hdr), "%s Temp. [\xA7""C]", nm);
@@ -670,25 +741,50 @@ void draw_setup_display()
     display.println("Cancel");
   }
 
-  if (editType==RUN_PCR) {
+  if (pcrLike(editType)) {
     const int xs[5] = {21,43,63,83,105};
     for (int i=0;i<5;i++) {
-      if ((i==2)&&tdOn()) draw_anneal_box(xs[i],55,MenuItem==4,editing);
+      if ((i==2)&&tdOn(editType)) draw_anneal_box(xs[i],55,MenuItem==4,editing);
       else draw_value_box(xs[i],55,ev[i*2],MenuItem==i*2,editing);
     }
 
     // cycles box
     display.drawRect(38,45,61,11,1);
     display.fillRect(38+1,45+1,61-2,11-2,0);
-    if ((MenuItem==10)&&!editing){
-      display.fillRect(56,45,25,11,1);
-      display.setTextColor(0);
+    if (editType==RUN_SQPCR) {                 // sqPCR: "40x P1/6/3" = cycles, first, second, every
+      char seg[4][8];
+      snprintf(seg[0], 8, "%dx", ev[10]);
+      snprintf(seg[1], 8, "P%d", sqsettings.pauseFirst);
+      snprintf(seg[2], 8, "/%d", sqsettings.pauseSecond);
+      snprintf(seg[3], 8, "/%d", sqsettings.pauseEvery);
+      int tw = 3;                             // text width incl. the gap before "P"
+      for (int i=0;i<4;i++) tw += strlen(seg[i])*6;
+      int bw = (tw+6 > 61) ? tw+6 : 61;       // box grows to fit, centred on the original box
+      int bx = 68 - bw/2;
+      display.drawRect(bx,45,bw,11,1);
+      display.fillRect(bx+1,46,bw-2,9,0);
+      int x = 68 - tw/2;
+      for (int i=0;i<4;i++) {
+        if (i==1) x += 3;                     // small gap before the pause part
+        int w = strlen(seg[i])*6;
+        if ((MenuItem==10+i)&&!editing) {display.fillRect(x-1,46,w+1,9,1); display.setTextColor(0);}
+        if ((MenuItem==10+i)&&editing) display.drawRect(x-1,46,w+1,9,1);
+        display.setCursor(x,47);
+        display.print(seg[i]);
+        display.setTextColor(1);
+        x += w;
+      }
+    } else {
+      if ((MenuItem==10)&&!editing){
+        display.fillRect(56,45,25,11,1);
+        display.setTextColor(0);
+      }
+      if ((MenuItem==10)&&editing)  display.drawRect(56,45,25,11,1);
+      display.setCursor(60,47);
+      display.print(ev[10]);
+      display.print("x");
+      display.setTextColor(1);
     }
-    if ((MenuItem==10)&&editing)  display.drawRect(56,45,25,11,1);
-    display.setCursor(60,47);
-    display.print(ev[10]);
-    display.print("x");
-    display.setTextColor(1);
 
     for (int i=0;i<5;i++) draw_value(xs[i],57,ev[i*2+1],MenuItem==i*2+1,editing);
   } else {
@@ -714,9 +810,10 @@ void draw_menu(const char* title, const char* const* items, int n, int sel)
   display.clearDisplay();
   display.setFont();
   draw_title(title);
+  int y0 = (n>4) ? 14 : 16, pitch = (n>4) ? 10 : 12;   // 5 rows need a tighter pitch
   for (int i=0;i<n;i++) {
-    int y = 16 + i*12;
-    if (sel==i) {display.fillRect(0,y-2,128,11,1); display.setTextColor(0);}
+    int y = y0 + i*pitch;
+    if (sel==i) {display.fillRect(0,y-(n>4 ? 1 : 2),128,(n>4 ? 10 : 11),1); display.setTextColor(0);}
     else display.setTextColor(1);
     drawCentered(y, items[i]);
   }
@@ -726,14 +823,14 @@ void draw_menu(const char* title, const char* const* items, int n, int sel)
 
 void draw_main_display()
 {
-  static const char* const items[3] = {"Run PCR", "Run RT", "Config >"};
-  draw_menu("Main Menu", items, 3, MenuItem);
+  static const char* const items[4] = {"Run PCR", "Run sqPCR", "Run RT", "Config >"};
+  draw_menu("Main Menu", items, 4, MenuItem);
 }
 
 void draw_config_display(int item)
 {
-  static const char* const items[4] = {"PCR program", "RT program", "Debug", "< Back"};
-  draw_menu("Config", items, 4, item);
+  static const char* const items[5] = {"PCR Program", "sqPCR Program", "RT Program", "Debug", "< Back"};
+  draw_menu("Config", items, 5, item);
 }
 
 // Debug pages: saved ramp statistics (knob = page, button = back)
@@ -786,11 +883,12 @@ void draw_run_display()
   display.setTextColor(0);
   if (counter%2==0) {
     if (runType==RUN_RT) snprintf(buf, sizeof(buf), "RT - Step %d of %d", PCRstate+1, numSteps(RUN_RT));
-    else if ((PCRstate>0)&&(PCRstate<4)&&(PCRcycle<=tdCycles())) snprintf(buf, sizeof(buf), "PCR - %d of %d TD", shownCycle, total);
-    else snprintf(buf, sizeof(buf), "PCR - %d of %d", shownCycle, total);
+    else if ((PCRstate>0)&&(PCRstate<4)&&(PCRcycle<=tdCycles(runType))) snprintf(buf, sizeof(buf), "%s - %d of %d TD", typeName(runType), shownCycle, total);
+    else snprintf(buf, sizeof(buf), "%s - %d of %d", typeName(runType), shownCycle, total);
     drawCentered(2, buf);
   } else {
-    drawCentered(2, (runType==RUN_RT) ? "Press to STOP RT" : "Press to STOP PCR");
+    snprintf(buf, sizeof(buf), "Press to STOP %s", typeName(runType));
+    drawCentered(2, buf);
     if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Done; counter=MenuItem;}
   }
   display.setTextColor(1);
@@ -821,10 +919,15 @@ void draw_run_display()
   display.print("Elapsed: ");
   display.print(buf);
 
-  // Estimated time until the run finishes
-  formatHMS(buf, sizeof(buf), estimateSecondsLeft());
+  // sqPCR with pauses still to come: time to the next reading; otherwise time to the end
   display.setCursor(0,55);
-  display.print("Remaining: ");
+  if ((runType==RUN_SQPCR)&&(nextPauseCycle>0)) {
+    formatHMS(buf, sizeof(buf), estimateSecondsLeft(nextPauseCycle));
+    display.print("Next Pause: ");
+  } else {
+    formatHMS(buf, sizeof(buf), estimateSecondsLeft());
+    display.print("Remaining: ");
+  }
   display.print(buf);
 
   display.display();
@@ -1007,6 +1110,9 @@ void learnRampRate()
 void printStats()
 {
   Serial.println("--- PocketPCR ramp stats ---");
+  Serial.print("this run: "); Serial.print(typeName(runType)); Serial.print(runCompleted ? " done" : " stopped");
+  Serial.print("  active "); Serial.print(runTotalSecs); Serial.print("s  paused "); Serial.print(pausedMs/1000);
+  Serial.print("s  pauses="); Serial.println(pauseCount);
   Serial.print("runs started/completed: "); Serial.print(stats.runsStarted); Serial.print("/"); Serial.println(stats.runsCompleted);
   Serial.print("last run est/actual s: "); Serial.print(stats.lastEstSecs); Serial.print("/"); Serial.println(stats.lastActualSecs);
   Serial.print("overall heat/cool C/s: "); Serial.print(stats.heatRate,3); Serial.print("/"); Serial.print(stats.coolRate,3);
@@ -1022,13 +1128,15 @@ void printStats()
 
 // Estimate of the time left in the run: the rest of the current step, then every remaining step
 // (ramp at the learned rate + hold time), following the same order as the PCR state machine.
-unsigned long estimateSecondsLeft()
+// stopCycle > 0: stop after the Extension of that cycle (sqPCR "Next Pause").
+unsigned long estimateSecondsLeft(int stopCycle)
 {
   float secs;
   if (casePCR == PCR_time) secs = (TIMEcontrol > 0) ? TIMEcontrol : 0;
   else secs = (roomStep ? 0 : rampSeconds(temperature_mean, stepTemp(PCRstate), PCRstate)) + stepTime(PCRstate);
 
   int st = PCRstate, cyc = PCRcycle;
+  if ((stopCycle>0)&&(st==3)&&(cyc==stopCycle)) return (unsigned long)secs;
   float prevT = assumedTemp(stepTemp(st));
   while (true) {
     int nx = nextStep(st, cyc);
@@ -1036,9 +1144,11 @@ unsigned long estimateSecondsLeft()
     st = nx;
     secs += rampSeconds(prevT, stepTempAt(st,cyc), st) + stepTime(st);
     prevT = assumedTemp(stepTempAt(st,cyc));
+    if ((stopCycle>0)&&(st==3)&&(cyc==stopCycle)) break;
   }
   return (unsigned long)secs;
 }
+unsigned long estimateSecondsLeft() { return estimateSecondsLeft(0); }
 
 // One ramp summary line, e.g. "Heat: 1.82°C/s ~12s" (time-weighted rate, average seconds per ramp)
 void printRampLine(const char* label, uint32_t n, float secs, float deg)
@@ -1060,8 +1170,8 @@ void draw_done_display()
 
   display.fillRect(0,0,128,11,1);
   display.setTextColor(0);
-  if (runType==RUN_RT) drawCentered(2, runCompleted ? "RT Done" : "RT Stopped");
-  else drawCentered(2, runCompleted ? "PCR Done" : "PCR Stopped");
+  snprintf(buf, sizeof(buf), "%s %s", typeName(runType), runCompleted ? "Done" : "Stopped");
+  drawCentered(2, buf);
   display.setTextColor(1);
 
   formatHMS(buf, sizeof(buf), runTotalSecs);
@@ -1094,29 +1204,37 @@ void draw_done_display()
 }
 
 // ---- Program helpers (PCR / RT) ----
-int* progVals(int type) { return (type==RUN_RT) ? rtprog.value : settings.value; }
+bool pcrLike(int type) { return (type==RUN_PCR)||(type==RUN_SQPCR); }
+EEprom& prog(int type) { return (type==RUN_SQPCR) ? sqsettings : settings; }   // PCR-like program data
+int* progVals(int type) { return (type==RUN_RT) ? rtprog.value : prog(type).value; }
 int numSteps(int type) { return (type==RUN_RT) ? 3 : 5; }
-int lastValItem(int type) { return (type==RUN_RT) ? 5 : 10; }    // last editable item; then Set, Cancel
-bool isTempItem(int type, int item) { return (item%2==0) && !((type==RUN_PCR)&&(item==10)); }
+int lastValItem(int type) { return (type==RUN_RT) ? 5 : ((type==RUN_SQPCR) ? 13 : 10); }  // then Set, Cancel
+bool isTempItem(int type, int item) { return (item%2==0) && !(pcrLike(type)&&(item>=10)); }
+const char* typeName(int type) { return (type==RUN_RT) ? "RT" : ((type==RUN_SQPCR) ? "sqPCR" : "PCR"); }
+int menuType(int idx) { return (idx==0) ? RUN_PCR : ((idx==1) ? RUN_SQPCR : RUN_RT); }  // Main / Config order
+int typeMenuIndex(int type) { return (type==RUN_PCR) ? 0 : ((type==RUN_SQPCR) ? 1 : 2); }
 int stepTempAt(int st, int cyc) {          // anneal follows the touchdown schedule
-  if ((runType==RUN_PCR)&&(st==2)) return annealTemp(cyc);
+  if (pcrLike(runType)&&(st==2)) return annealTemp(runType, cyc);
   return progVals(runType)[st*2];
 }
 int stepTemp(int st) { return stepTempAt(st, PCRcycle); }
 
 // ---- Touchdown ----
-bool tdOn() { return (settings.value[4]!=TEMP_ROOM) && (settings.tdStart > settings.value[4]); }
-int tdCycles() { return tdOn() ? (settings.tdStart - settings.value[4] + TD_STEP - 1) / TD_STEP : 0; }
-int annealTemp(int cyc) {
-  if (!tdOn()) return settings.value[4];
-  int t = settings.tdStart - (cyc-1)*TD_STEP;
-  return (t < settings.value[4]) ? settings.value[4] : t;
+bool tdOn(int type) { if (!pcrLike(type)) return false; EEprom &P = prog(type);
+  return (P.value[4]!=TEMP_ROOM) && (P.tdStart > P.value[4]); }
+int tdCycles(int type) { EEprom &P = prog(type);
+  return tdOn(type) ? (P.tdStart - P.value[4] + TD_STEP - 1) / TD_STEP : 0; }
+int annealTemp(int type, int cyc) {
+  EEprom &P = prog(type);
+  if (!tdOn(type)) return P.value[4];
+  int t = P.tdStart - (cyc-1)*TD_STEP;
+  return (t < P.value[4]) ? P.value[4] : t;
 }
 // Fewest total cycles for a full touchdown: the step-down cycles plus one at the end temp
-int minCycles() { return tdOn() ? tdCycles() + 1 : 1; }
-bool isAnnealItem() { return (editType==RUN_PCR) && (MenuItem==4); }
+int minCycles(int type) { return tdOn(type) ? tdCycles(type) + 1 : 1; }
+bool isAnnealItem() { return pcrLike(editType) && (MenuItem==4); }
 int stepTime(int st) { return progVals(runType)[st*2+1]; }
-int totalCycles() { return (runType==RUN_RT) ? 1 : settings.value[10]; }   // PCR: total, touchdown included
+int totalCycles() { return (runType==RUN_RT) ? 1 : prog(runType).value[10]; }   // total, touchdown included
 int statsIndex(int st) { return (runType==RUN_RT) ? 5+st : st; }
 float assumedTemp(int raw) { return (raw==TEMP_ROOM) ? ROOM_TEMP_EST : raw; }
 
@@ -1124,7 +1242,8 @@ const char* stepName(int type, int st)
 {
   static const char* pcr[5] = {"Init", "Denature", "Annealing", "Extension", "Final"};
   static const char* rt[3]  = {"Incubation", "Transcribe", "Deactivate"};
-  return (type==RUN_RT) ? rt[st] : pcr[st];
+  if (type==RUN_RT) return (st>=0 && st<3) ? rt[st] : "";
+  return (st>=0 && st<5) ? pcr[st] : "";
 }
 
 // Step after st in the running program (cyc is the PCR cycle, updated), or -1 when the run is over
@@ -1145,6 +1264,101 @@ void startRun(int type)
   runCompleted=false; estAtStart=0; stats.runsStarted++;
   runHeatN=0; runCoolN=0; runHeatSecs=0; runCoolSecs=0; runHeatDeg=0; runCoolDeg=0;
   for (int i=0;i<10;i++) TEMPdif_a[i]=0;
+  pausedMs=0; pauseCount=0; pauseEditing=false;
+  userN=0;
+  if (type==RUN_SQPCR) {nextPauseCycle=sqsettings.pauseFirst; pauseN=sqsettings.pauseEvery;}
+  else nextPauseCycle=0;
+}
+
+// PID bookkeeping (error, integral, 200 ms derivative), shared by running and pausing
+void updatePIDTerms()
+{
+  TEMPdif=TEMPset-temperature_mean;
+  TEMPi=TEMPi+(TEMPset-temperature_mean);
+  if (millis()-TEMPclick>200) {
+    TEMPclick=millis();
+    TEMPd=TEMPdif_a[4]-TEMPdif;
+    TEMPdif_a[4]=TEMPdif_a[3];
+    TEMPdif_a[3]=TEMPdif_a[2];
+    TEMPdif_a[2]=TEMPdif_a[1];
+    TEMPdif_a[1]=TEMPdif_a[0];
+    TEMPdif_a[0]=TEMPdif;
+  }
+}
+
+// Move to the next step, or finish the run
+void advanceStep()
+{
+  int cyc=PCRcycle;
+  int nx=nextStep(PCRstate,cyc);
+  if (nx<0) {
+    caseUX=CASE_Done;
+    runCompleted=true;
+    stats.runsCompleted++;
+    stats.lastEstSecs=estAtStart;
+    stats.lastActualSecs=(millis()-runStart-pausedMs)/1000;   // active time, excluding reading pauses
+  } else {PCRstate=nx; PCRcycle=cyc; casePCR=PCR_set;}
+}
+
+// sqPCR: stop after Extension for a manual reading, holding the Extension temperature
+void enterPause()
+{
+  char buf[12];
+  caseUX=CASE_Paused; pauseStartMs=millis(); pauseCount++;
+  pauseSel=0; pauseEditing=false; counter=0;
+  // Resume [N] default follows the schedule (first -> second, then every), unless changed this run
+  if (userN>0) pauseN=userN;
+  else if ((pauseCount==1)&&(sqsettings.pauseSecond>PCRcycle)) pauseN=sqsettings.pauseSecond-PCRcycle;
+  else pauseN=sqsettings.pauseEvery;
+  formatHMS(buf, sizeof(buf), (millis()-runStart)/1000);
+  Serial.print("PAUSE cycle="); Serial.print(PCRcycle); Serial.print("/"); Serial.print(totalCycles());
+  Serial.print(" elapsed="); Serial.print(buf); Serial.print(" block="); Serial.println(temperature_mean,1);
+}
+
+// Leave the pause. next = cycle of the next pause (0 or past the end = no more pauses)
+void resumeRun(int next)
+{
+  pausedMs += millis()-pauseStartMs;
+  nextPauseCycle = ((next>0)&&(next<=totalCycles())) ? next : 0;
+  Serial.print("RESUME next=");
+  if (nextPauseCycle>0) Serial.println(nextPauseCycle); else Serial.println("none");
+  caseUX=CASE_Run; counter=0;
+  advanceStep();
+}
+
+// Pause screen: Resume [N] / Run to completion / Stop run, plus "Holding at <Extension temp>" and time paused
+void draw_pause_display()
+{
+  char buf[24];
+  display.clearDisplay();
+  display.setFont();
+  snprintf(buf, sizeof(buf), "Paused: cycle %d/%d", PCRcycle, totalCycles());
+  draw_title(buf);
+
+  snprintf(buf, sizeof(buf), "Resume [%d cycle%s]", pauseN, pauseN==1 ? "" : "s");
+  const char* items[3] = {buf, "Run to completion", "Stop run"};
+  for (int i=0;i<3;i++) {                   // rows at y 14, 24, 34 (10 px pitch)
+    int y = 14 + i*10;
+    if (pauseSel==i) {
+      if ((i==0)&&pauseEditing) display.drawRect(0,y-1,128,10,1);       // editing N: outline
+      else {display.fillRect(0,y-1,128,10,1); display.setTextColor(0);}
+    }
+    drawCentered(y, items[i]);
+    display.setTextColor(1);
+  }
+
+  display.drawLine(0,44,127,44,1);
+  // Hold Temp: target / block, like the run screen's Temp line
+  display.setCursor(0,47);
+  display.print("Hold: ");
+  display.print((int)(TEMPset+0.5)); display.print("\xA7""C / ");
+  display.print(temperature_mean,1); display.print("\xA7""C");
+  // Time paused
+  unsigned long ps=(millis()-pauseStartMs)/1000;
+  formatHMS(buf, sizeof(buf), ps);
+  display.setCursor(0,56);
+  display.print("Paused: "); display.print(buf);
+  display.display();
 }
 
 // Annealing bar with touchdown: outline up to the start temp, a line across at the end temp.
@@ -1152,8 +1366,8 @@ void startRun(int type)
 // or above the bar if that would hit the cycles box.
 void draw_anneal_box(int x, int y, bool highlight, bool edit)
 {
-  int start = settings.tdStart;
-  int endRaw = settings.value[4];
+  int start = prog(editType).tdStart;
+  int endRaw = prog(editType).value[4];
   int endH = (endRaw==TEMP_ROOM) ? TEMP_ROOM_COUNTER : endRaw;
   int top = y+2-start/2;
   int lineY = y+2-endH/2;
@@ -1171,4 +1385,14 @@ void draw_anneal_box(int x, int y, bool highlight, bool edit)
   if (showEnd) { if (endRaw==TEMP_ROOM) display.print("RT"); else display.print(endRaw); }
   else display.print(start);
   display.setTextColor(1);
+}
+
+// sqPCR editor: keep first <= cycles and second after first (or pulled to the cycle count)
+void clampPauses()
+{
+  int cyc = sqsettings.value[10];
+  if (sqsettings.pauseFirst > cyc) sqsettings.pauseFirst = cyc;
+  if (sqsettings.pauseSecond <= sqsettings.pauseFirst) sqsettings.pauseSecond = sqsettings.pauseFirst+1;
+  if (sqsettings.pauseSecond > PAUSE_MAX_N) sqsettings.pauseSecond = PAUSE_MAX_N;
+  if (sqsettings.pauseSecond > cyc) sqsettings.pauseSecond = cyc;
 }

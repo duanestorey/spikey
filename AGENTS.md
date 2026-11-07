@@ -14,7 +14,7 @@ Working notes for AI coding agents and humans. This file describes the project *
   - The user's unit shipped with GaudiLabs **V1.03 2022**, which was never published (the repo only has V1.02).
   - It was built for the **Adafruit Feather M0** board setting (USB 239A:800B).
   - The bootloader is SAM-BA "v2.0 [Arduino:XYZ]" (239A:000B), not UF2.
-  - Its dump is kept **local only**: `firmware-backup/*.bin` is git-ignored. Never commit or push it; there's no source for it.
+  - Its dump is kept **local only**: all `*.bin` files are git-ignored (so are any dumps made in the repo root). Never commit or push it; there's no source for it.
 
 ## Repository layout
 
@@ -79,9 +79,10 @@ A single `loop()`, no RTOS. Each pass reads the temperature, runs the safety che
   - "OVER TEMP": above `T_MAX` (105 °C)
   - "NO HEATING": full power for 60 s while more than 5 °C below target, with less than 2 °C rise
   - All blocking button waits go through `waitRelease()`, which turns the heater off first.
-- **Screens** (`caseUX`): `CASE_Main` (Run PCR / Run RT / Config >) → `CASE_Config` (PCR program / RT program / Debug / < Back) → `CASE_Settings` / `CASE_EditSettings` (editor, `editType`) or `CASE_Debug` (3 pages); `CASE_Run` → `CASE_Done`; `CASE_Error`. Menus use `draw_menu()` / `draw_title()`, a small font with a plain title and a separator.
-- **Program types** (`runType`: `RUN_PCR` / `RUN_RT`). The run code only uses the helpers at the end of the sketch: `stepTemp`/`stepTempAt`, `stepTime`, `totalCycles`, `nextStep`, `stepName`, `statsIndex`, `startRun`.
+- **Screens** (`caseUX`): `CASE_Main` (Run PCR / Run sqPCR / Run RT / Config >) → `CASE_Config` (PCR / sqPCR / RT Program / Debug / < Back; menus with more than 4 items use a 10 px pitch) → `CASE_Settings` / `CASE_EditSettings` (editor, `editType`) or `CASE_Debug` (3 pages); `CASE_Run` ⇄ `CASE_Paused` (sqPCR) → `CASE_Done`; `CASE_Error`. Menu item ↔ type mapping: `menuType()` / `typeMenuIndex()`. Menus use `draw_menu()` / `draw_title()`, a small font with a plain title and a separator.
+- **Program types** ("sqPCR" = semi-quantitative PCR, the owner's name for the paused qPCR-style program; keep it) (`runType`: `RUN_PCR` 0 / `RUN_RT` 1 / `RUN_SQPCR` 2). `pcrLike()` covers PCR and sqPCR; `prog(type)` returns `settings` or `sqsettings`. The run code only uses the helpers at the end of the sketch: `stepTemp`/`stepTempAt`, `stepTime`, `totalCycles`, `nextStep`, `stepName`, `statsIndex`, `startRun`.
   - **PCR:** `settings` (`EEprom` in `my_flash_store`). `value[0..9]` are temp/time pairs for Init, Denature, Annealing, Extension and Final; `value[10]` is the **total** cycle count; `value[11]` is the "already set up" flag; `tdStart` is the touchdown start. The cycle loops over steps 1–3.
+  - **sqPCR:** `sqsettings` (`EEprom` in `sqpcr_store`): the PCR layout plus `pauseFirst`, `pauseSecond` and `pauseEvery`, all **1–9** (`PAUSE_MAX_N`). Editor items: 10 cycles, 11 first pause (baseline), 12 second pause (> first), 13 every, 14 Set, 15 Cancel. `clampPauses()` keeps first ≤ cycles and first < second ≤ 9/cycles. The cycles box draws `40x P1/6/3` with each segment highlighted separately. Defaults: the PCR steps, 40 cycles, `P1/6/3` (pauses after cycles 1, 6, 9, 12 …).
   - **RT:** `rtprog` (`RTprog` in `rt_store`, `RT_MAGIC`). Incubation, Transcribe and Deactivate, one pass each.
 - **Run state machine** (`casePCR`): `PCR_set` → `PCR_transition` (ramp to within ±0.5 °C) → `PCR_time` (hold) → `nextStep()`; −1 means Done.
 - **Touchdown** (PCR Annealing only):
@@ -89,18 +90,27 @@ A single `loop()`, no RTOS. Each pass reads the temperature, runs the safety che
   - **Schedule:** `annealTemp(cyc)` = max(end, start − (cyc−1)·`TD_STEP`), with a 1 °C step. `tdCycles()` = start − end.
   - **Cycle count:** the total stays **≥ `minCycles()`** (tdCycles + 1). The cycles editor can't go below it, and widening the range raises it automatically (never lowers it).
   - **Editor:** item 4 has two phases (`annealPhase`): start, then end. While touchdown is off, the end follows the start (`tdLinked`). `draw_anneal_box()` draws the bar to the start height with a line at the end.
-  - **Run title:** "PCR - n of N TD" during the touchdown cycles.
+  - **Run title:** "PCR/sqPCR - n of N TD" during the touchdown cycles. The touchdown helpers take the program type: `tdOn(type)`, `tdCycles(type)`, `annealTemp(type,cyc)`, `minCycles(type)`.
+- **sqPCR pauses:**
+  - **Trigger:** in `PCR_time`, after the Extension of `nextPauseCycle`, `enterPause()` switches to `CASE_Paused`.
+  - **Holding:** `CASE_Paused` keeps running `updatePIDTerms()` + `runPID()`, so the block holds the Extension temperature.
+  - **Pause screen:** `draw_pause_display()` shows Resume [`pauseN`] (1–9; press to edit, press again to resume), "Run to completion" and "Stop run". `pauseN` defaults to the schedule: second − first at the first pause, then `pauseEvery`. If the user changes it, `userN` keeps their value for the rest of the run.
+  - **Resume:** `resumeRun(next)` adds the paused time to `pausedMs`, sets `nextPauseCycle` (0 = no more pauses), then `advanceStep()`.
+  - **Next Pause:** the run screen shows it via `estimateSecondsLeft(nextPauseCycle)`.
+  - **Paused time** is excluded from Total Time and `lastActualSecs`.
+  - **Serial log:** `PAUSE cycle=… elapsed=… block=…` and `RESUME next=…`.
 - **Room temperature:** `TEMP_ROOM` = 0, shown as "RT". It's selected by turning a temperature below 25 (editor value 24). The heater stays off, the timer starts at once, and the fan runs while the block is above 30 °C. Works in either program.
 - **Auto cool-down** (`CASE_Done`): fan at full until the block stops dropping (< 0.3 °C per 30 s) or 60 s pass (`COOL_TIMEOUT_MS`). Then the bottom line shows a **COMPLETE** bar.
 - **Time estimate:** `estimateSecondsLeft()` walks the rest of the program (touchdown temperatures included). It adds ramp time (|ΔT| ÷ rate) plus hold time.
   - Rates come from each step's measured mean if there is one, otherwise the overall rate. Defaults: `HEAT_RATE_DEFAULT` 1.04 / `COOL_RATE_DEFAULT` 1.01 °C/s.
   - On an empty block, estimate vs actual was 721 s vs 707 s.
-- **Ramp statistics:** `RampStats` in `stats_store` (`STATS_MAGIC` "RAM2"). `step[8]` holds slots 0–4 for PCR and 5–7 for RT.
+- **Ramp statistics:** `RampStats` in `stats_store` (`STATS_MAGIC` "RAM2"). `step[8]` holds slots 0–4 for PCR **and sqPCR** (same physical ramps) and 5–7 for RT.
   - Each ramp of 3 °C or more updates its step's n, mean, min, max and last values.
   - Also stored: runs started/done, and the last run's estimated vs actual time.
   - Written **once per run** (on entering Done) and printed to serial at 115200.
 - **Default programs** (written on the first boot after an upload):
   - **PCR:** 95 °C 5 min / 94 °C 30 s / **63 → 55 °C** 30 s / 72 °C 30 s / 72 °C 5 min, **35** cycles.
+  - **sqPCR:** the same steps, **40** cycles, pauses after cycles **1** and **6**, then every **3**.
   - **RT:** Room 10 min / 55 °C 20 min / 85 °C 5 min.
 
 ## Open issues and ideas
@@ -111,10 +121,16 @@ A single `loop()`, no RTOS. Each pass reads the temperature, runs the safety che
 - **Software SPI to the OLED is slow.** PA22/PA23 can use SERCOM3 hardware SPI.
 - **Settings are lost on every upload.** A save/restore around uploads would fix this.
 - **Roadmap:**
+  - **next:** a device Settings page under Config (temperature calibration offset first; Config then needs a scrolling list)
+  - power-failure resume
   - named saved programs (5-character names entered with the knob)
   - an adjustable touchdown step under Config
   - a 6-well block (larger solid centre on the heater PCB, shorter fins). Needs caliper measurements first.
   - a fan upgrade test (4.0 CFM)
+
+**Considered and not planned:**
+- **Melt curves:** need in-situ fluorescence, but the owner reads tubes outside the block. If optics are ever added, the unused `LID` (D9 MOSFET) and `TEMP_LID` (A1 on `J4`) could drive an LED and read a photodiode.
+- **Gradient and sub-ambient holds:** impossible on this hardware.
 
 ## Conventions for agents
 
