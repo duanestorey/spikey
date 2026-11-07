@@ -90,6 +90,8 @@ python3 -c "import os,termios;fd=os.open('/dev/cu.usbmodem101',os.O_RDWR|os.O_NO
 ```
 In bootloader mode the screen goes blank, and the USB ID changes to `239A:000B` (the port name usually stays the same).
 
+> **About "1200 baud":** this is only a signal, not the transfer speed. Opening and closing the port at 1200 baud tells the firmware to reboot into its bootloader. The PocketPCR uses native USB, so the baud rate is ignored and reads and writes run at full USB speed. A full backup takes about 10 s, and flashing plus verifying takes about 7 s.
+
 Then read the whole application area, 248 KB above the 8 KB bootloader. Read it twice and compare:
 ```sh
 bossac -U true --port=cu.usbmodem101 -r pocketpcr_backup.bin
