@@ -1,176 +1,126 @@
-# AGENTS.md — PocketPCR (fork)
+# AGENTS.md — Spikehole (PocketPCR firmware fork)
 
-Notes for AI coding agents and humans working on this repo. This file holds a project review (Nov 2026), how to build and flash the firmware, known bugs, and the plan for adding **touchdown PCR**.
+Working notes for AI coding agents and humans. This file describes the project **as it is now**: hardware, firmware structure, how to build, back up and flash, and the conventions to follow. For the user-facing description and changelog, see `README.md`.
 
 ## What this is
 
-A fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/PocketPCR): a pocket-size, USB-powered PCR thermocycler that holds 5 tubes. It uses an aluminium block with a bottom heater, a fan for cooling, a 128×64 OLED screen and a rotary encoder with a push button.
+**Spikehole** is a firmware fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/PocketPCR), a pocket-size, USB-powered PCR thermocycler for 5 tubes. The device has an aluminium block on a heater PCB, a fan, a 128×64 OLED and a rotary encoder with a push button.
 
-- `origin` = this fork, `upstream` = GaudiLabs. When reviewed, both were at the same commit (`daf77fc`), so nothing from upstream is missing.
-- License: GPL (see `LICENSE`).
+- **Repo:** [duanestorey/Spikehole](https://github.com/duanestorey/Spikehole) (`origin`). `upstream` is GaudiLabs.
+- **Branch:** work happens on **`1.0.0`**. `master` is still GaudiLabs' original (`daf77fc`, tag `gaudilabs-v1.02`).
+- **Versions:** betas are `Spikehole 0.0.Nb` (`VersionString`), with N going up on each flashed release, until launch as `1.0.0`. Tags are `spikehole-0.0.Nb`; the first one, from before the rename, is `storey-0.0.1b`. Add each release to the README changelog.
+- **License:** GPL-3.0 (`LICENSE`).
+- **Device facts:**
+  - The user's unit shipped with GaudiLabs **V1.03 2022**, which was never published (the repo only has V1.02).
+  - It was built for the **Adafruit Feather M0** board setting (USB 239A:800B).
+  - The bootloader is SAM-BA "v2.0 [Arduino:XYZ]" (239A:000B), not UF2.
+  - Its dump is kept **local only**: `firmware-backup/*.bin` is git-ignored. Never commit or push it; there's no source for it.
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `code/PocketPCR_V2_quite_dev_i_disp/` | **All firmware.** The main sketch `.ino` (~700 lines) plus bundled copies of the `Rotary` (encoder) and `FlashStorage` (SAMD flash-as-EEPROM) libraries |
-| `PCB_Layouts/PocketPCR_PCB/RocketPCR/` | Main board KiCad (old KiCad 5 format) files and Gerbers. "RocketPCR" is just the old project name. |
-| `PCB_Layouts/PocketPCR_Lid/` | Lid PCB (KiCad and Gerbers). Mechanical/cosmetic only; there is no lid heater on this device. |
-| `PCB_Layouts/PocketPCR_BottomHeater/` | Heater PCB, DXF outlines, NTC lookup sheet (`PCR_Temp_NTCG103.ods`) |
-| `docs/ramp-measurements.md` | Log of measured heat/cool rates per run (empty vs loaded, fan tests). Add to it after each test run |
-| `PocketPCR_BOM.ods`, `Parts/` | Bill of materials; heater block drawing (GaudiLabs PDF) and a 3D model of the block (FreeCAD/STEP/3MF, by Andre Maia Chagas, GPL-3.0; credits and checksums in `Parts/info.md`) |
+| `code/PocketPCR_V2_quite_dev_i_disp/` | **All firmware.** One sketch `.ino`, plus bundled `Rotary` and `FlashStorage` libraries |
+| `tools/decode_stats.py` | Decodes the ramp statistics from a flash dump |
+| `docs/ramp-measurements.md` | Log of measured heat/cool rates per run (empty vs loaded, fan tests). **Add a row after each test run.** |
+| `docs/superpowers/specs/2026-11-07-touchdown-design.md` | Design doc and roadmap |
+| `firmware-backup/` | README (checksum and restore command for the V1.03 dump) and saved stats files. The `.bin` itself is local only. |
+| `Parts/` | Block drawing (GaudiLabs PDF) and a 3D model of the block (FreeCAD/STEP/3MF by Andre Maia Chagas, GPL-3.0). Credits and checksums are in `Parts/info.md`. |
+| `PCB_Layouts/PocketPCR_PCB/RocketPCR/` | Main board KiCad 5 files and Gerbers ("RocketPCR" is the old project name) |
+| `PCB_Layouts/PocketPCR_BottomHeater/` | Heater PCB: an aluminium-core board with a Ø29 outline, a solid Ø19.5 centre under the block, and 20 radial cooling fins. DXFs, NTC sheet. |
+| `PCB_Layouts/PocketPCR_Lid/` | Lid PCB (5 × Ø6 tube holes at r = 7 mm). There is no lid heater. |
+| `PocketPCR_BOM.ods` | Bill of materials. The fan is a generic 5 V 3010 (30×30×10 mm, 2-pin) on `J1`. |
 
-Not in the repo: enclosure files, build docs, the Adafruit display libraries, and any tests or CI.
+There are no tests and no CI. Hardware testing is done by the owner.
 
 ## Hardware ↔ firmware pin map (checked against `RocketPCR.net`)
 
-The MCU is an **ATSAMD21G18** (TQFP48). The firmware uses **Arduino Zero** pin numbering, and every pin below matches the schematic:
+The MCU is an **ATSAMD21G18A** (TQFP48, 256 KB flash / 32 KB RAM). Arduino Zero / Feather M0 pin numbering:
 
-| Function | Net | SAMD21 pin | Arduino pin in code |
+| Function | Net | SAMD21 | Arduino pin |
 |---|---|---|---|
 | Block thermistor (NTC 10k, B=3435, 4.7k divider) | TEMP_BLOCK | PB09 | `A2` |
-| Bottom heater MOSFET (PWM) | BLOCK | PA06 | `8` |
+| Heater MOSFET (PWM) | BLOCK | PA06 | `8` |
 | Fan MOSFET (PWM) | FAN | PA08 | `4` |
 | Encoder A / B | ENC1 / ENC2 | PA20 / PA21 | `6` / `7` |
-| Encoder push button | SW1 | PA05 | `A4` |
+| Encoder button | SW1 | PA05 | `A4` |
 | OLED MOSI / CLK (software SPI) | DISP_SDA / DISP_SCL | PA22 / PA23 | `20` / `21` |
-| OLED DC / CS / RESET | DISP_DC / DISP_CS / DISP_RES | PA11 / PA12 / PA15 | `0` / `22` / `5` |
-| USB | D- / D+ | PA24 / PA25 | native USB |
+| OLED DC / CS / RESET | — | PA11 / PA12 / PA15 | `0` / `22` / `5` |
+| USB | D- / D+ | PA24 / PA25 | native |
 | SWD (bootloader recovery) | SWDIO / SWCLK | PA31 / PA30 | header `J2` |
 
-**Not used on PocketPCR:** `LID` (PA07 / D9, MOSFET Q3) and `TEMP_LID` (PB08 / A1). These lid parts look like leftovers from an earlier design. GaudiLabs' qPocketPCR is a **separate device** (an ESP32 with a camera and a TFT screen, repo `GaudiLabs/qPocketPCR`), not this board. `lidPin` is declared in the code but never driven, and that is expected. **Do not "fix" this.** For safety it is fine to drive D9 LOW explicitly.
+**Unused on purpose:** `LID` (D9, Q3) and `TEMP_LID` (A1). They're leftovers from an earlier design. GaudiLabs' qPocketPCR is a different, ESP32-based device. Don't "fix" this.
 
-## Building and flashing
+## Build, back up, flash
 
-Yes, this code should build and flash to the device with the stock Arduino SAMD core. Not yet verified on hardware in this fork.
+See **README → "Backing up and flashing"** for the step-by-step guide. Agent specifics:
 
-Arduino IDE:
-1. Boards Manager → install **Arduino SAMD Boards (32-bits ARM Cortex-M0+)**.
-2. Library Manager → install **Adafruit GFX Library** and **Adafruit SSD1306** (2.x; the last upstream commit adapted the code to the newer SSD1306 constructor).
-3. Board: **Adafruit Feather M0** (needs the Adafruit SAMD package; the board manager URL is `https://adafruit.github.io/arduino-board-index/package_adafruit_index.json`). GaudiLabs' shipped V1.03 was built this way, and the device reports USB ID 239A:800B. Arduino Zero (Native USB Port) also works, because every pin this firmware uses maps to the same chip pin. Open `code/PocketPCR_V2_quite_dev_i_disp/PocketPCR_V2_quite_dev_i_disp.ino` and upload.
-
-arduino-cli:
-```sh
-arduino-cli core install arduino:samd adafruit:samd --additional-urls https://adafruit.github.io/arduino-board-index/package_adafruit_index.json
-arduino-cli lib install "Adafruit GFX Library" "Adafruit SSD1306"
-arduino-cli compile --fqbn adafruit:samd:adafruit_feather_m0 code/PocketPCR_V2_quite_dev_i_disp
-arduino-cli upload  --fqbn adafruit:samd:adafruit_feather_m0 -p <port> code/PocketPCR_V2_quite_dev_i_disp
-```
-
-Notes:
-- Upload over USB needs the Arduino Zero bootloader on the device; production units should already have it. If the port doesn't appear, double-tap reset to enter the bootloader. On a blank or bricked board, burn the bootloader through the SWD header `J2` (J-Link, Atmel-ICE, or a CMSIS-DAP probe with "Burn Bootloader").
-- **Back up the device firmware before the first upload.** The Arduino-bundled `bossac` (1.7.0-arduino3, at `~/Library/Arduino15/packages/arduino/tools/bossac/1.7.0-arduino3/bossac`) has no `--offset` option. It always starts at 0x2000, just above the 8 KB bootloader. With the device in bootloader mode (double-tap reset):
+- **Build:**
   ```sh
-  bossac -U true --port=cu.usbmodemXXXX -r pocketpcr_backup.bin       # read app flash; expect 253952 bytes (0x3E000)
-  bossac -U true --port=cu.usbmodemXXXX -e -w -v -R pocketpcr_backup.bin  # restore
+  arduino-cli compile --fqbn adafruit:samd:adafruit_feather_m0 code/PocketPCR_V2_quite_dev_i_disp
   ```
-- **Uploading new firmware erases the saved cycle settings.** `FlashStorage` lives inside the program's flash, so settings reset to defaults on every upload.
-- Hold the button while powering on for left-handed mode (screen rotated 180°).
-- No toolchain was available during the review, so the code has not been compiled in this fork yet. Do that first.
+  Current size: about 66 KB (25%).
+- **Flash routine** (ask the owner before each flash; the device may be mid-run):
+  1. Check the V1.03 backup checksum: `54c55b6f…` (full value in `firmware-backup/README.md`).
+  2. Enter the bootloader with a 1200-baud touch on the port.
+  3. `bossac -U true --port=… -r dump.bin`, then run `python3 tools/decode_stats.py dump.bin`. If there are stats, save them to `firmware-backup/stats-<date>-<version>.txt` and add a row to `docs/ramp-measurements.md`. **Uploading wipes the stats and the saved programs.**
+  4. `arduino-cli compile --upload -p /dev/cu.usbmodemXXX …`. Check that it says "Verify successful" and that the device comes back as 239A:800B.
+- **Stuck in the bootloader:** after a 1200-baud touch, `bossac -R` returns to the bootloader, not the app. Power-cycle the device to leave it.
+- **Default programs:** after an upload, the defaults below are written to flash. So a flash doesn't force the owner to re-enter a normal program.
 
 ## How the firmware works
 
-All of it is in the `.ino`, in a single `loop()` with no RTOS:
+A single `loop()`, no RTOS. Each pass reads the temperature, runs the safety checks, then handles the current screen.
 
-- **Temperature:** each loop turns the heater off, reads the ADC, then turns the heater back on, so heater current doesn't disturb the reading. The thermistor value is converted to °C with the B-parameter equation and smoothed with `temperature_mean = (3*old + new)/4`.
-- **Control:** a PID-style controller (`PIDp 0.5`, `PIDi 0.0001`, `PIDd 0.15`). Its output goes through `power_heating()` / `power_cooling()`, which use fitted constants (`FA_*`) that model the block's heat loss. Positive output drives the heater; negative output drives the fan. The I term only switches on once the target has been reached.
-- **UI state machine** (`caseUX`): `CASE_Main` → `CASE_Settings` / `CASE_EditSettings` → `CASE_Run` → `CASE_Done`.
-- **PCR state machine** (`casePCR`): `PCR_set` (load the target) → `PCR_transition` (ramp until within ±0.5 °C) → `PCR_time` (hold for the set time). `PCRstate` steps through 0 Init, 1 Denature, 2 Annealing, 3 Extension, 4 Final. After 3 it loops back to 1 until `PCRcycle > settings.value[10]`.
-- **Settings:** `settings.value[12]` (ints), with temps at even indices and times at odd ones: `[0,1]` Init, `[2,3]` Denature, `[4,5]` Anneal, `[6,7]` Extension, `[8,9]` Final, `[10]` cycle count, and `[11]` used as an "already set up" flag (`==0` → write defaults). Times over 90 s are shown and edited in minutes.
-- The encoder interrupt (`rotate()`) increments or decrements a global `counter`, and the current screen interprets it.
+- **Temperature:** heater off → ADC read → heater back on. B-parameter conversion, smoothed by `temperature_mean = (3*old + new)/4`, updated only from valid readings.
+- **Control:** PID (`PIDp 0.5`, `PIDi 0.0001`, `PIDd 0.15`). The output goes through `power_heating()` / `power_cooling()`, fitted block heat-loss models (`FA_*`). Positive output drives the heater, negative drives the fan; they're never on together. The I term only starts once the target has been reached.
+- **Safety:** `checkSafety()` runs every loop (except on the error screen). `tripError()` switches to `CASE_Error`: heater off, fan on, an error screen, and a button press returns to Main.
+  - "SENSOR ERR": ADC ≤ 20 or ≥ 4075, or NaN
+  - "OVER TEMP": above `T_MAX` (105 °C)
+  - "NO HEATING": full power for 60 s while more than 5 °C below target, with less than 2 °C rise
+  - All blocking button waits go through `waitRelease()`, which turns the heater off first.
+- **Screens** (`caseUX`): `CASE_Main` (Run PCR / Run RT / Config >) → `CASE_Config` (PCR program / RT program / Debug / < Back) → `CASE_Settings` / `CASE_EditSettings` (editor, `editType`) or `CASE_Debug` (3 pages); `CASE_Run` → `CASE_Done`; `CASE_Error`. Menus use `draw_menu()` / `draw_title()`, a small font with a plain title and a separator.
+- **Program types** (`runType`: `RUN_PCR` / `RUN_RT`). The run code only uses the helpers at the end of the sketch: `stepTemp`/`stepTempAt`, `stepTime`, `totalCycles`, `nextStep`, `stepName`, `statsIndex`, `startRun`.
+  - **PCR:** `settings` (`EEprom` in `my_flash_store`). `value[0..9]` are temp/time pairs for Init, Denature, Annealing, Extension and Final; `value[10]` is the **total** cycle count; `value[11]` is the "already set up" flag; `tdStart` is the touchdown start. The cycle loops over steps 1–3.
+  - **RT:** `rtprog` (`RTprog` in `rt_store`, `RT_MAGIC`). Incubation, Transcribe and Deactivate, one pass each.
+- **Run state machine** (`casePCR`): `PCR_set` → `PCR_transition` (ramp to within ±0.5 °C) → `PCR_time` (hold) → `nextStep()`; −1 means Done.
+- **Touchdown** (PCR Annealing only):
+  - **On/off:** on when `tdStart > value[4]` and the end isn't Room (`tdOn()`).
+  - **Schedule:** `annealTemp(cyc)` = max(end, start − (cyc−1)·`TD_STEP`), with a 1 °C step. `tdCycles()` = start − end.
+  - **Cycle count:** the total stays **≥ `minCycles()`** (tdCycles + 1). The cycles editor can't go below it, and widening the range raises it automatically (never lowers it).
+  - **Editor:** item 4 has two phases (`annealPhase`): start, then end. While touchdown is off, the end follows the start (`tdLinked`). `draw_anneal_box()` draws the bar to the start height with a line at the end.
+  - **Run title:** "PCR - n of N TD" during the touchdown cycles.
+- **Room temperature:** `TEMP_ROOM` = 0, shown as "RT". It's selected by turning a temperature below 25 (editor value 24). The heater stays off, the timer starts at once, and the fan runs while the block is above 30 °C. Works in either program.
+- **Auto cool-down** (`CASE_Done`): fan at full until the block stops dropping (< 0.3 °C per 30 s) or 60 s pass (`COOL_TIMEOUT_MS`). Then the bottom line shows a **COMPLETE** bar.
+- **Time estimate:** `estimateSecondsLeft()` walks the rest of the program (touchdown temperatures included). It adds ramp time (|ΔT| ÷ rate) plus hold time.
+  - Rates come from each step's measured mean if there is one, otherwise the overall rate. Defaults: `HEAT_RATE_DEFAULT` 1.04 / `COOL_RATE_DEFAULT` 1.01 °C/s.
+  - On an empty block, estimate vs actual was 721 s vs 707 s.
+- **Ramp statistics:** `RampStats` in `stats_store` (`STATS_MAGIC` "RAM2"). `step[8]` holds slots 0–4 for PCR and 5–7 for RT.
+  - Each ramp of 3 °C or more updates its step's n, mean, min, max and last values.
+  - Also stored: runs started/done, and the last run's estimated vs actual time.
+  - Written **once per run** (on entering Done) and printed to serial at 115200.
+- **Default programs** (written on the first boot after an upload):
+  - **PCR:** 95 °C 5 min / 94 °C 30 s / **63 → 55 °C** 30 s / 72 °C 30 s / 72 °C 5 min, **35** cycles.
+  - **RT:** Room 10 min / 55 °C 20 min / 85 °C 5 min.
 
-## Review findings (what to fix)
+## Open issues and ideas
 
-In priority order. Line numbers refer to the `.ino` at commit `daf77fc` (tag `gaudilabs-v1.02`). Items marked **FIXED (Spikehole 0.0.1b)** are done on branch `storey-1.0`.
-
-1. **FIXED (Spikehole 0.0.1b).** **No protection against thermal runaway (high).** If the thermistor is disconnected (ADC ≈ 4095) or shorted (ADC ≈ 0), the temperature calculation (~L201–203) produces a very low or NaN reading, and the controller runs the heater at full power indefinitely. Add: limits on the raw ADC value, a NaN check, a maximum temperature cutoff (e.g. >105 °C), and a "heating but temperature not rising" timeout. On any fault, turn the heater off and the fan on, and show an error screen. The block thermistor is the device's only temperature sensor.
-2. **FIXED (Spikehole 0.0.1b).** **A second run in the same session does only one cycle (high).** `PCRcycle` is set to 1 at power-on and never reset when a run starts (L227). Reset `PCRcycle`, `TEMPi`, `TEMPdif_a[]` and `PIDIntegration` when a run starts.
-3. **Partly fixed (Spikehole 0.0.1b):** the waits now turn the heater off first; they still block the loop. **Waiting for a button release freezes the controller (medium).** `while(!digitalRead(butPin));` is used everywhere, including during a run (L556). While the button is held, the heater stays at its last PWM value with no temperature control. Replace these waits with a non-blocking edge or debounce check.
-4. **The I term depends on loop speed (low/medium).** `TEMPi` grows once per loop pass instead of over time; the D term uses 200 ms samples. Changing how long drawing takes changes the control behaviour. Base the PID on a fixed time step (e.g. 100–200 ms) using `millis()`.
-5. **Stop is awkward (low).** "Press to STOP" only works when `counter` is odd, so you have to turn the knob one click first.
-6. **Minor:**
-   - The defaults are unusual (denature 120 s per cycle, no 72 °C final extension).
-   - The variable `x` in `draw_run_display` is always 0.
-   - ~~"Left Handed Mode" text is always shown on the splash screen.~~ Replaced by a hint (Spikehole 0.0.1b).
-   - ~~Pressing Cancel reads `settings.value[12]`, one past the end of the array.~~ Fixed (Spikehole 0.0.1b).
-   - `SETTING_String` is sized 6 but only 5 entries are filled in.
-   - Software SPI to the OLED is slow and makes the loop slower.
-
-There are no tests. If you add logic, keep the pure parts (temperature conversion, touchdown schedule, state transitions) in functions with no hardware calls, so they can be unit-tested on the host later.
-
-## Changes in this fork
-
-### Spikehole 0.0.3b: Touchdown PCR
-
-- **Default PCR program** (written on the first boot after an upload): Init 95 °C 5 min; Denature 94 °C 30 s; Annealing touchdown 63 → 55 °C, 30 s; Extension 72 °C 30 s; Final extension 72 °C 5 min; 35 cycles in total (8 touchdown + 27 at 55 °C).
-- **Data:** `EEprom` gains `tdStart`, the anneal **start** temperature. `value[4]` is the anneal **end** temperature. Touchdown is on when `tdStart > value[4]` and the end isn't Room (`tdOn()`). Defaults: 63 → 55, so touchdown is **on** by default: of the default 35 cycles, 8 step down from 63 to 56 and 27 run at 55. The step is `TD_STEP` = 1 °C per cycle.
-- **Schedule:** **`value[10]` is the total cycle count, with the touchdown cycles included.** `tdCycles()` = start − end (rounded up for larger steps) is how many of those cycles step down. `annealTemp(cyc)` = max(end, start − (cyc−1)·TD_STEP). `stepTempAt(st,cyc)` routes PCR step 2 through it, so `PCR_set`, `nextStep()` and `estimateSecondsLeft()` all follow the schedule. The editor keeps the total **≥ `minCycles()`** = tdCycles + 1, so the touchdown always reaches the end temperature. The Cycles item can't go below it, and editing the anneal range raises the cycle count automatically when needed (it never lowers it). Example: 2 cycles with 63→62; moving the end to 61 raises it to 3.
-- **Run screen:** title "PCR - n of N TD" during the touchdown cycles; the Temp line shows the current anneal target.
-- **Editing (Config → PCR, Annealing):** press once to edit the **start** ("Anneal start [°C]", 25–99). If touchdown was off, the end follows the start (`tdLinked`), so a plain anneal change works as before. Press again to edit the **end** ("Anneal end [°C]", Room–start). A third press finishes. Lowering the start below the end pulls the end down with it.
-- **Bar:** with touchdown on, `draw_anneal_box()` draws the outline to the start temperature with a line across at the end. The label shows the start (or the end while editing it) and sits just under the line, or above the bar if it would hit the cycles box. Browsing header: "Annealing 63>55 [°C]". The "Nx" box shows the total cycle count.
-
-### Spikehole 0.0.2b: PCR + RT programs, Config menu, Room temperature
-
-- **Main menu:** Run PCR / Run RT / Config >, in the small font under a plain "Main Menu" title with a separator line (`draw_title()`, also used by Config and Debug). It shares `draw_menu()` with Config.
-- **Config** (`CASE_Config`, `draw_config_display()`): PCR program / RT program / Debug / < Back. PCR and RT open the editor (`CASE_Settings`/`CASE_EditSettings`, generalised with `editType`). Set saves and Cancel discards; both return to Config.
-- **Program types:** `runType` is `RUN_PCR` or `RUN_RT`. The run code goes through the helpers at the end of the sketch (`stepTemp`, `stepTime`, `totalCycles`, `nextStep`, `stepName`, `statsIndex`, `startRun`), so the state machine, the estimate and the statistics work for both.
-  - **PCR:** uses `settings.value[0..10]`, unchanged GaudiLabs layout. Editor items: 0–9 temp/time, 10 cycles, 11 Set, 12 Cancel.
-  - **RT:** a separate `FlashStorage` named `rt_store` (`RTprog`, `RT_MAGIC` "RTP1") with 3 temp/time pairs: **Incubation, Transcribe, Deactivate**. One pass, then the usual auto cool-down. Defaults: Room 10 min / 55 °C 20 min / 85 °C 5 min. Editor items: 0–5, 6 Set, 7 Cancel. Three bars at x = 30/62/94, with no cycle box.
-- **Room temperature** (`TEMP_ROOM` = 0, shown "RT"): turn a temperature below 25 °C to select it (editor value 24). The heater stays off and the timer starts at once, with no ±0.5 °C wait. The fan runs while the block is above `ROOM_FAN_ABOVE` (30 °C). The estimate assumes the next step starts from `ROOM_TEMP_EST` (25 °C). Room steps aren't counted in the ramp statistics. Works in both programs.
-- **Run screen:** title "PCR - n of N" or "RT - Step n of 3"; "Temp: Room / xx.x°C" during Room steps. **Done:** "PCR/RT Done" or "PCR/RT Stopped".
-- **Debug** (`CASE_Debug`, `draw_debug_display()`): three pages, knob = page, button = back. Page 1: runs started/done, last run's estimated vs actual time, overall heat/cool rates. Page 2: PCR per-step ramp count and mean °C/s. Page 3: the same for RT.
-- **Statistics:** `RampStats.step[8]` (0–4 PCR, 5–7 RT); `STATS_MAGIC` bumped to "RAM2".
-
-### Spikehole 0.0.1b
-
-Branch `storey-1.0`. Firmware name: **Spikehole** (renamed from "Storey" at 0.0.2b; the 0.0.1b tag keeps its old name `storey-0.0.1b`, and new tags are `spikehole-0.0.Nb`). Current firmware **Spikehole 0.0.2b**; previous **0.0.1b** (tag `storey-0.0.1b`). Versioning: beta releases are `Spikehole 0.0.Nb` (N increments each release) until launch at `1.0.0`; each release is tagged `spikehole-0.0.Nb`. Baseline tag: `gaudilabs-v1.02` (= upstream `daf77fc`). Build size (Feather M0, Adafruit SAMD 1.7.17): 59.6 KB flash (22%).
-
-- **Version and splash screen:** a 5 s splash (`SPLASH_MS`) in the small built-in font, centred horizontally and vertically: "PocketPCR" (as GaudiLabs writes it on the website/repo; the PCB silkscreen says "Pocket PCR") / "by GaudiLabs" / (blank) / "Version" / "Spikehole 0.0.1b" (`VersionString`). The original splash had no delay, so it was never visible. Holding the button during the splash selects left-handed mode.
-- **Run screen redesign:**
-  - Title bar "PCR - n of N" (0 during Init, N during Final), or "Press to STOP PCR" after turning the knob.
-  - Rows: "State:"; "Temp: set°C / block°C"; a separator; "Cycle Time:" (seconds left in the current step); "Elapsed:" (h:mm:ss since Run was pressed, from `runStart`); "Remaining:" (h:mm:ss, estimated).
-  - The estimate (`estimateSecondsLeft()`) walks through the rest of the program in the same order as the state machine. For each remaining step it adds the ramp time (|ΔT| ÷ rate) and the hold time.
-  - Ramp rates start at `HEAT_RATE_DEFAULT` / `COOL_RATE_DEFAULT` (1.04 / 1.01 °C/s, measured on a 1-cycle run on 2026-11-07, so only a few ramps). After each real ramp of more than 3 °C, `learnRampRate()` blends the measured rate into them, so the estimate tightens after the first few steps. The learned rates last until power-off.
-- **Done screen summary** (`draw_done_display()`):
-  - Title bar "PCR Done", or "PCR Stopped" if the run was stopped.
-  - "Total Time:" for this run, and "Estimated:" (the estimate made at the start).
-  - "Heat:" and "Cool:" for this run: time-weighted °C/s, and the average seconds per ramp (`~12s`), from `runHeat*`/`runCool*`.
-  - A separator, then "Cooling: xx.x°C" while the auto cool-down runs. When it ends, the line under the separator becomes a solid inverted bar reading **COMPLETE**, so it's clear the run is fully finished.
-- **Ramp statistics in flash** (`RampStats`, a second `FlashStorage` named `stats_store`, separate from the settings so Set/Cancel don't touch it):
-  - **Contents:** overall heat/cool rates; per target step (0 Init … 4 Final) the number of ramps measured, mean/min/max °C/s, and the last ramp's ΔT and seconds; runs started/completed; and for the last completed run, the estimate made at the start (`lastEstSecs`) and the actual duration (`lastActualSecs`).
-  - **Measuring:** each ramp of at least `RAMP_MIN_DELTA` (3 °C) is measured when it reaches its target (`learnRampRate()`).
-  - **Saving:** written to flash **once per run**, when Done is entered (finished or stopped), to limit flash wear. Also printed to USB serial at 115200 (`printStats()`).
-  - **Use in the estimate:** `rampSeconds()` uses the step's own mean rate when it has data in the same direction, and the overall heat/cool rate otherwise.
-  - **Reset:** a magic number (`STATS_MAGIC`) resets the stats when the layout changes. A **firmware upload also wipes them**, because FlashStorage lives in program flash.
-  - **Planned:** a debug page to view these on the device, under the future Settings menu.
-- **Run state reset:** starting a run resets `PCRcycle`, `TEMPi`, `TEMPd`, `TEMPdif_a[]` and `PIDIntegration`, so back-to-back runs do the full cycle count.
-- **Heater off while waiting for the button:** every blocking wait for a button release goes through `waitRelease()`, which calls `setHeater(0,0)` first.
-- **Out-of-range read fixed:** pressing on Set/Cancel (items 11 and 12) no longer reads `settings.value[12]`.
-- **Safety cutoff:** `checkSafety()` runs every loop except on the error screen, and `tripError()` switches to the new `CASE_Error` state: heater off, fan on, an error screen with the block temperature, and a button press returns to the main menu (a fault that's still there trips again). Trip conditions:
-  - raw ADC ≤ `ADC_MIN` (20) or ≥ `ADC_MAX` (4075), or a NaN temperature: "SENSOR ERR"
-  - `temperature_mean > T_MAX` (105 °C): "OVER TEMP"
-  - during a run, heater at full power (`heatPower >= 250`) while more than `NOHEAT_BELOW` (5 °C) below target, with less than `NOHEAT_RISE` (2 °C) rise in `NOHEAT_MS` (60 s): "NO HEATING"
-  - The running average `temperature_mean` is only updated from valid readings, so a bad reading can't leave it stuck at NaN.
-
-- **Auto cool-down on the Done screen** (`CASE_Done`). When a run finishes or is stopped, the heater stays off and the fan runs at full speed. Every `COOL_SAMPLE_MS` (30 s) the firmware compares the block temperature with the previous sample. Once it has dropped less than `COOL_STABLE_DROP` (0.3 °C), the block counts as near room temperature and the fan stops. `COOL_TIMEOUT_MS` (60 s) is a hard limit: the fan never runs longer than that. The 10-minute original never seemed to stop in practice. Pressing the button stops cooling and returns to the main menu. The screen shows "Cooling xx.x °C", then "Block xx.x °C". This means the **Final step can be used as a real final extension** (e.g. 72 °C / 5 min) instead of a 25 °C hold. The fan can't get below room temperature, so a 25 °C step may never reach its ±0.5 °C window and finish.
-
-## Goal: touchdown PCR
-
-In **touchdown PCR**, the annealing temperature starts several degrees above the primers' Tm and drops by a fixed step each cycle, typically 0.5–1 °C per cycle, until it reaches the target. The remaining cycles then run at that target temperature. This reduces non-specific products in early cycles.
-
-### Agreed design and roadmap
-
-**The current design and roadmap are in [`docs/superpowers/specs/2026-11-07-touchdown-design.md`](docs/superpowers/specs/2026-11-07-touchdown-design.md).** That doc supersedes earlier notes here. Summary:
-
-- **Order of work:** groundwork (compile setup, firmware backup, run-state reset, safety cutoff, out-of-range read fix) → touchdown → Settings item on the main menu → named saved programs (5-character names entered with the knob) → program types (PCR / Hold).
-- **Touchdown settings:** a new `td_start` field; `value[4]` becomes the anneal *end* temperature. Touchdown is on when `td_start > value[4]`. Defaults are 63 → 55 °C, with a fixed 1 °C/cycle step (`TD_STEP`).
-- **Cycle count:** touchdown cycles (`td_start - value[4]`) are added **before** the normal cycle count.
-- **Editing:** done on the Annealing bar as a range. Pressing once edits the top (start) and pressing again edits the bottom line (end). Menu numbering 0–12 is unchanged.
-- **Saved settings:** a `magic` field replaces the `value[11]` "already set up" flag.
+- **Blocking button waits.** The heater is safe (it's turned off), but the loop still blocks while the button is held. Should become non-blocking.
+- **The PID's I term depends on loop speed.** Move it to a fixed `millis()` time step.
+- **Stop needs a knob click first.** "Press to STOP" only shows on odd encoder counts.
+- **Software SPI to the OLED is slow.** PA22/PA23 can use SERCOM3 hardware SPI.
+- **Settings are lost on every upload.** A save/restore around uploads would fix this.
+- **Roadmap:**
+  - named saved programs (5-character names entered with the knob)
+  - an adjustable touchdown step under Config
+  - a 6-well block (larger solid centre on the heater PCB, shorter fins). Needs caliper measurements first.
+  - a fan upgrade test (4.0 CFM)
 
 ## Conventions for agents
 
-- Keep the sketch building with the stock Arduino SAMD core and Library Manager libraries. Don't add a build system without discussing it first.
-- Keep the code style (Arduino globals, `#define` state names). Keep changes small and explain any change to the controller.
-- Anything that can drive the heater must fail safe: heater off by default, and on any doubt about the temperature reading.
+- Keep the sketch building with the stock Arduino SAMD / Adafruit SAMD cores and Library Manager libraries. Don't add a build system without discussing it.
+- Keep the existing code style (Arduino globals, `#define` state names). Keep changes small, and explain any change to the controller.
+- Anything that can drive the heater must fail safe: heater off by default, and whenever the temperature reading is in doubt.
+- **Ask before flashing.** Save the stats first (see the flash routine). **Never commit or push the V1.03 dump.**
+- Bump `VersionString` for each flashed release, and keep `README.md` (changelog) and this file current.
 - Don't modify Gerber or production files under `PCB_Layouts/**/Gerber/` unless asked.
