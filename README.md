@@ -3,12 +3,13 @@
 **Spikey** is an alternative firmware for the **[PocketPCR](http://gaudi.ch/PocketPCR/)**, the pocket-size, USB-powered PCR thermocycler designed by [GaudiLabs](http://www.gaudi.ch/GaudiLabs/). It runs on the stock PocketPCR hardware and adds:
 
 - touchdown PCR
-- **sqPCR** (semi-quantitative PCR): a PCR program with **reading pauses**, for manual fluorescence readings
 - a separate RT (reverse transcription) program
 - safety cutoffs
 - a time-remaining estimate
 - run summaries
 - an automatic cool-down
+
+**Coming in 1.1.0:** **sqPCR** (semi-quantitative PCR), a PCR program with **reading pauses** for manual fluorescence readings. It's written but switched off in 1.0 builds; see [sqPCR (coming in 1.1.0)](#sqpcr-coming-in-110).
 
 This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/PocketPCR). All the hardware design files (PCBs, BOM, block drawing) are GaudiLabs' work and are included unchanged. Please support the original project and open science hardware at [gaudishop.ch](https://gaudishop.ch/).
 
@@ -16,11 +17,9 @@ This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/
 
 ## Features
 
-- **Three programs**, each with its own saved settings:
+- **Two programs**, each with its own saved settings:
   - **PCR:** Init → n × [Denature → Annealing → Extension] → Final extension
-  - **sqPCR** (semi-quantitative PCR): the same as PCR, plus pauses for manual fluorescence readings. It finds roughly where each sample's curve rises (within a cycle or two), using an external fluorometer. It isn't a replacement for a real-time qPCR instrument.
   - **RT:** Incubation → Transcribe → Deactivate, one pass
-- **sqPCR reading pauses:** the run pauses after Extension at chosen cycles and **holds at the Extension temperature** while you read the tubes. On the pause screen you choose **Resume [N cycles]** (change N during the run, e.g. to 1–2 once fluorescence starts rising), **Run to completion** (plateau found) or **Stop run**. The run screen shows **Next Pause:** as an estimated countdown to the next reading.
 - **Touchdown PCR:** set a start and an end temperature on the Annealing bar, and the anneal temperature drops 1 °C per cycle until it reaches the end. The cycle count is the total, touchdown included. It can't be set lower than a full touchdown needs, and widening the touchdown raises it automatically.
 - **Room temperature ("RT") steps:** turn any temperature below 25 °C. The heater stays off and the step's timer starts immediately. Good for room-temperature incubations, which the fan alone can't hold reliably.
 - **Run screen:** cycle count (with "TD" during touchdown), step, target and block temperature, time left in the step, elapsed time, and **estimated time remaining**. The estimate learns this block's real heating and cooling rates.
@@ -32,8 +31,8 @@ This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/
 
 | Screen | Items |
 |---|---|
-| **Main Menu** | Run PCR · Run sqPCR · Run RT · Config > |
-| **Config** | PCR Program · sqPCR Program · RT Program · Debug · About · < Back (scrolls; About shows the start-up splash with the version) |
+| **Main Menu** | Run PCR · Run RT · Config > |
+| **Config** | PCR Program · RT Program · Debug · About · < Back (About shows the start-up splash with the version) |
 
 - **Turn** the knob to move and **press** to select.
 - **In a program editor:**
@@ -46,35 +45,44 @@ This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/
   3. The third press finishes.
 
   When the start and end are equal, touchdown is off.
-- **sqPCR pauses:** set them in Config → sqPCR Program. The cycles box reads e.g. `40x P1/6/3`: 40 cycles in total, a **baseline pause after cycle 1**, a **second pause after cycle 6**, then **every 3** cycles. Each part is its own item, and the pause numbers are 1–9. During a pause:
+- **Stop a run:** turn the knob one click, then press "Press to STOP".
+- **Left-handed mode:** hold the button during the 5-second start-up splash to rotate the screen.
+
+**Default programs** (loaded after every firmware upload):
+
+| Step | PCR |
+|---|---|
+| Init | 95 °C, 5 min |
+| Denature | 94 °C, 30 s |
+| Annealing | 63 → 55 °C (touchdown), 30 s |
+| Extension | 72 °C, 30 s |
+| Final extension | 72 °C, 5 min |
+| Cycles | 35 (8 touchdown + 27) |
+
+**RT:** Incubation Room 10 min → Transcribe 55 °C 20 min → Deactivate 85 °C 5 min.
+
+## sqPCR (coming in 1.1.0)
+
+**sqPCR** (semi-quantitative PCR) is the same as PCR, plus pauses for manual fluorescence readings. It finds roughly where each sample's curve rises (within a cycle or two), using an external fluorometer. It isn't a replacement for a real-time qPCR instrument.
+
+It's finished but **switched off in 1.0 builds** and will ship in **1.1.0**. To try it now, set `#define ENABLE_SQPCR 1` near the top of the sketch and flash. "Run sqPCR" and "sqPCR Program" then appear in the menus (Config gets 6 items and scrolls).
+
+- **Reading pauses:** the run pauses after Extension at chosen cycles and **holds at the Extension temperature** while you read the tubes. On the pause screen you choose **Resume [N cycles]** (change N during the run, e.g. to 1–2 once fluorescence starts rising), **Run to completion** (plateau found) or **Stop run**. The run screen shows **Next Pause:** as an estimated countdown to the next reading.
+- **Setting the pauses:** in Config → sqPCR Program. The cycles box reads e.g. `40x P1/6/3`: 40 cycles in total, a **baseline pause after cycle 1**, a **second pause after cycle 6**, then **every 3** cycles. Each part is its own item, and the pause numbers are 1–9. During a pause:
   - **Resume [N cycles]:** press to change N (1–9), turn, then press again to resume. N follows the schedule (5 after the cycle-1 pause, then 3) unless you change it; a changed N is kept for the rest of the run.
   - **Run to completion:** runs to the end without stopping again.
   - **Stop run:** ends the run.
 
   The block holds at the Extension temperature throughout, and the bottom lines show the hold temperature with the live block temperature ("Hold: 72°C / 71.9°C") and the time paused.
-- **sqPCR tips:**
+- **Tips:**
   - Use an oil overlay; there's no heated lid.
   - Read tubes one at a time, taking each out and reading it **promptly and at the same pace every time**, because the dye's brightness changes as the tube cools.
   - Normalise each tube's readings to its own baseline and plateau, and compare where the curves rise.
   - Include a no-template control (NTC).
   - Spacing: amplification curves typically rise from baseline to plateau over only **6–7 cycles**, so pausing every 3 gives 2–3 points in the rise. The cycle-1 pause gives a **baseline** reading at the same temperature and chemistry as all later reads, and cycles 6, 9 and 12 add more baseline points before a typical rise. Once fluorescence starts climbing, drop Resume to 1–2 cycles.
   - The serial log (115200 baud) records each pause's cycle and time.
-- **Stop a run:** turn the knob one click, then press "Press to STOP".
-- **Left-handed mode:** hold the button during the 5-second start-up splash to rotate the screen.
 
-**Default programs** (loaded after every firmware upload):
-
-| Step | PCR | sqPCR |
-|---|---|---|
-| Init | 95 °C, 5 min | 95 °C, 5 min |
-| Denature | 94 °C, 30 s | 94 °C, 30 s |
-| Annealing | 63 → 55 °C (touchdown), 30 s | 63 → 55 °C (touchdown), 30 s |
-| Extension | 72 °C, 30 s | 72 °C, 30 s |
-| Final extension | 72 °C, 5 min | 72 °C, 5 min |
-| Cycles | 35 (8 touchdown + 27) | 40 (8 touchdown + 32) |
-| Pauses | — | after cycles 1 and 6, then every 3 (`P1/6/3`) |
-
-**RT:** Incubation Room 10 min → Transcribe 55 °C 20 min → Deactivate 85 °C 5 min.
+**Default sqPCR program:** the PCR steps above, **40** cycles (8 touchdown + 32), pauses after cycles **1** and **6**, then every **3** (`P1/6/3`).
 
 ## Backing up and flashing
 
@@ -162,21 +170,25 @@ Unplug and replug the device afterwards.
 
 ## Changelog
 
-### 1.0.0 (unreleased)
-
-First stable Spikey release. Compared with GaudiLabs' PocketPCR firmware V1.02:
+### 1.1.0 (planned)
 
 **New**
-- **PCR, sqPCR and RT programs**, each with its own saved settings. RT is Incubation → Transcribe → Deactivate, one pass.
-- **sqPCR program for manual fluorescence readings:**
+- **sqPCR program for manual fluorescence readings** (already in the code behind `ENABLE_SQPCR`):
   - pauses after Extension at chosen cycles, holding the Extension temperature
   - a pause screen with **Resume [N cycles]** (adjustable mid-run), **Run to completion** and **Stop run**
   - a **Next Pause** countdown on the run screen
   - pause and resume events logged over USB serial
   - paused time left out of the run statistics
+
+### 1.0.0 (unreleased)
+
+First stable Spikey release. Compared with GaudiLabs' PocketPCR firmware V1.02:
+
+**New**
+- **PCR and RT programs**, each with its own saved settings. RT is Incubation → Transcribe → Deactivate, one pass.
 - **Touchdown PCR** on the Annealing step: a start/end range on the bar, 1 °C per cycle. The cycle count is the total, kept at least as long as a full touchdown needs.
 - **Room temperature ("RT") steps:** heater off, and the timer starts immediately.
-- **Menus:** Main Menu (Run PCR / Run sqPCR / Run RT / Config >) and Config (PCR Program / sqPCR Program / RT Program / Debug / About / < Back; scrolls), in a clean small-font style.
+- **Menus:** Main Menu (Run PCR / Run RT / Config >) and Config (PCR Program / RT Program / Debug / About / < Back), in a clean small-font style. Lists longer than 5 items scroll.
 - **Run screen:** cycle count with a touchdown marker, step, target and block temperature, step time, elapsed time and **estimated time remaining**.
 - **Time estimate** that learns this block's real heating and cooling rates for each step. Measured within about 2% on an empty block.
 - **Done screen** with total vs estimated time and this run's heating and cooling rates, plus an **automatic cool-down** and a **COMPLETE** banner.
@@ -197,6 +209,7 @@ First stable Spikey release. Compared with GaudiLabs' PocketPCR firmware V1.02:
 
 | Version | Highlights |
 |---|---|
+| 0.0.8b | sqPCR switched off for 1.0 (build flag `ENABLE_SQPCR`, planned for 1.1.0); menus show PCR and RT only |
 | 0.0.7b | Config > About (shows the splash and version again); menus longer than 5 items scroll |
 | 0.0.6b | sqPCR program with manual reading pauses (Resume [N], Run to completion, Next Pause countdown; P1/6/3 schedule); 5-item Config menu; renamed to Spikey |
 | 0.0.5b | Default programs updated (PCR 95/94/63→55/72/72, 35 cycles; RT Room/55 °C 20 min/85 °C) |

@@ -16,8 +16,9 @@ https://github.com/GaudiLabs/PocketPCR
 
 #include <Fonts/FreeSans9pt7b.h>
 
-const char VersionString[] = "Spikey 0.0.7b";   // fork of GaudiLabs PocketPCR V1.02 2020
+const char VersionString[] = "Spikey 0.0.8b";   // fork of GaudiLabs PocketPCR V1.02 2020
 #define SPLASH_MS 5000                         // how long the start-up splash is shown
+#define ENABLE_SQPCR 0        // 1 = include the sqPCR program (reading pauses). Held back until 1.1.0
 
 // These constants won't change. They're used to give names to the pins used:
 const int analogInPin = A2;  // Analog input pin that the temperature sensor is attached to
@@ -152,6 +153,7 @@ EEprom sqsettings;   // sqPCR program
 #define RUN_PCR 0
 #define RUN_RT 1
 #define RUN_SQPCR 2
+#define N_TYPES (ENABLE_SQPCR ? 3 : 2)   // program types in the menus
 
 // sqPCR manual-reading pauses: after Extension of nextPauseCycle the run holds at the Extension temp
 #define PAUSE_MAX_N 9       // pause numbers (first, second, every, Resume [N]) are single digits
@@ -346,13 +348,13 @@ switch (caseUX) {
 
 case CASE_Main:
 
-   if (counter>3) counter=0;
-   if (counter<0) counter=3;
+   if (counter>N_TYPES) counter=0;
+   if (counter<0) counter=N_TYPES;
    MenuItem = counter;
    draw_main_display();
 
    if (!digitalRead(butPin)) {waitRelease();
-     if (MenuItem<3) startRun(menuType(MenuItem));      // Run PCR / Run sqPCR / Run RT
+     if (MenuItem<N_TYPES) startRun(menuType(MenuItem));      // Run PCR / (Run sqPCR) / Run RT
      else {caseUX=CASE_Config; counter=0;}
    }
 
@@ -360,22 +362,22 @@ case CASE_Main:
 
 case CASE_Config:
   {
-    if (counter>5) counter=0;
-    if (counter<0) counter=5;
+    if (counter>N_TYPES+2) counter=0;
+    if (counter<0) counter=N_TYPES+2;
     int item = counter;
     draw_config_display(item);
     if (!digitalRead(butPin)) {waitRelease();
-      if (item<3) {editType = menuType(item); caseUX=CASE_Settings; counter=0;}   // PCR / sqPCR / RT program
-      else if (item==3) {caseUX=CASE_Debug; counter=0;}
-      else if (item==4) {caseUX=CASE_About;}
-      else {caseUX=CASE_Main; counter=3;}
+      if (item<N_TYPES) {editType = menuType(item); caseUX=CASE_Settings; counter=0;}   // PCR / (sqPCR) / RT program
+      else if (item==N_TYPES) {caseUX=CASE_Debug; counter=0;}
+      else if (item==N_TYPES+1) {caseUX=CASE_About;}
+      else {caseUX=CASE_Main; counter=N_TYPES;}
     }
   }
     break;
 
 case CASE_About:                 // the start-up splash again; press to go back
     draw_splash();
-    if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Config; counter=4;}
+    if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Config; counter=N_TYPES+1;}
     break;
 
 case CASE_Debug:
@@ -383,7 +385,7 @@ case CASE_Debug:
     if (counter>2) counter=0;
     if (counter<0) counter=2;
     draw_debug_display(counter);
-    if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Config; counter=3;}
+    if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Config; counter=N_TYPES;}
 
     break;
 
@@ -838,14 +840,22 @@ void draw_splash()
 
 void draw_main_display()
 {
-  static const char* const items[4] = {"Run PCR", "Run sqPCR", "Run RT", "Config >"};
-  draw_menu("Main Menu", items, 4, MenuItem);
+#if ENABLE_SQPCR
+  static const char* const items[] = {"Run PCR", "Run sqPCR", "Run RT", "Config >"};
+#else
+  static const char* const items[] = {"Run PCR", "Run RT", "Config >"};
+#endif
+  draw_menu("Main Menu", items, N_TYPES+1, MenuItem);
 }
 
 void draw_config_display(int item)
 {
-  static const char* const items[6] = {"PCR Program", "sqPCR Program", "RT Program", "Debug", "About", "< Back"};
-  draw_menu("Config", items, 6, item);
+#if ENABLE_SQPCR
+  static const char* const items[] = {"PCR Program", "sqPCR Program", "RT Program", "Debug", "About", "< Back"};
+#else
+  static const char* const items[] = {"PCR Program", "RT Program", "Debug", "About", "< Back"};
+#endif
+  draw_menu("Config", items, N_TYPES+3, item);
 }
 
 // Debug pages: saved ramp statistics (knob = page, button = back)
@@ -1226,8 +1236,14 @@ int numSteps(int type) { return (type==RUN_RT) ? 3 : 5; }
 int lastValItem(int type) { return (type==RUN_RT) ? 5 : ((type==RUN_SQPCR) ? 13 : 10); }  // then Set, Cancel
 bool isTempItem(int type, int item) { return (item%2==0) && !(pcrLike(type)&&(item>=10)); }
 const char* typeName(int type) { return (type==RUN_RT) ? "RT" : ((type==RUN_SQPCR) ? "sqPCR" : "PCR"); }
-int menuType(int idx) { return (idx==0) ? RUN_PCR : ((idx==1) ? RUN_SQPCR : RUN_RT); }  // Main / Config order
-int typeMenuIndex(int type) { return (type==RUN_PCR) ? 0 : ((type==RUN_SQPCR) ? 1 : 2); }
+// Program types in Main / Config menu order (sqPCR only when ENABLE_SQPCR)
+#if ENABLE_SQPCR
+static const int menuTypes[N_TYPES] = {RUN_PCR, RUN_SQPCR, RUN_RT};
+#else
+static const int menuTypes[N_TYPES] = {RUN_PCR, RUN_RT};
+#endif
+int menuType(int idx) { return menuTypes[(idx>=0 && idx<N_TYPES) ? idx : 0]; }
+int typeMenuIndex(int type) { for (int i=0;i<N_TYPES;i++) if (menuTypes[i]==type) return i; return 0; }
 int stepTempAt(int st, int cyc) {          // anneal follows the touchdown schedule
   if (pcrLike(runType)&&(st==2)) return annealTemp(runType, cyc);
   return progVals(runType)[st*2];
