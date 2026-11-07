@@ -15,6 +15,8 @@ This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/
 
 > **Status:** beta (`Spikey 0.0.Nb`), working towards **1.0.0**. Development happens on the `1.0.0` branch. `master` is GaudiLabs' original firmware (V1.02).
 
+> **Use at your own risk.** Spikey is an unofficial, hobbyist firmware, provided **without any warranty**. It isn't a medical or diagnostic device. See [Safety and disclaimer](#safety-and-disclaimer).
+
 ## Features
 
 - **Two programs**, each with its own saved settings:
@@ -223,6 +225,16 @@ First stable Spikey release. Compared with GaudiLabs' PocketPCR firmware V1.02:
 - **PocketPCR hardware and original firmware:** [GaudiLabs](http://www.gaudi.ch/GaudiLabs/) (Urs Gaudenz). Project page: <http://gaudi.ch/PocketPCR/>
 - **3D model of the heater block:** Andre Maia Chagas ([@amchagas](https://github.com/amchagas)). See `Parts/info.md`.
 - **Spikey firmware changes:** Duane Storey.
+
+## Safety and disclaimer
+
+Spikey is free software, provided **"as is", without warranty of any kind**, express or implied, including fitness for a particular purpose. By installing it, **you use it entirely at your own risk**. This is the same as GPL-3.0 sections 15 and 16 (see `LICENSE`): the author isn't liable for any damage, injury, loss of samples, data or equipment, or any other consequence of using it.
+
+- **Not a medical or diagnostic device.** Spikey is for education, hobby and research use only. Don't use it for clinical, diagnostic, food-safety or any other decision where a wrong result matters.
+- **Unofficial.** Spikey isn't made, endorsed or supported by GaudiLabs. Installing it replaces the factory firmware, and may affect any support or warranty you have from the maker. Back up your original firmware first (see [Backing up and flashing](#backing-up-and-flashing)).
+- **It controls a heater.** The block reaches about 100 °C. The firmware has safety cutoffs (sensor failure, over-temperature, heater not warming), but they can't cover every fault. Don't leave a run unattended where an overheating device could cause harm. Keep it on a non-flammable surface, away from anything that can melt or burn, and unplug it if anything looks or smells wrong.
+- **Results aren't guaranteed.** Temperatures come from a single block thermistor and aren't calibrated against a reference. Check important protocols with your own controls.
+- **Lab safety is up to you,** including biological material, reagents, gel stains and UV light.
 
 ## License
 
