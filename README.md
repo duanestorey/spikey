@@ -216,6 +216,8 @@ First stable Spikey release. Compared with GaudiLabs' PocketPCR firmware V1.02:
 - **Heater off** whenever the firmware waits for the button. Previously, holding the button froze the heater at its last power level.
 - **Back-to-back runs fixed:** a second run in the same session used to do only one cycle.
 - **Out-of-range memory read** when pressing Cancel in the editor, fixed.
+- **Step times capped at 99 min,** so they no longer overflow the editor box ("100m").
+- **Unsaved edits are discarded** if an error interrupts the editor, so the next run uses the saved program.
 
 **Build**
 - Built for the **Adafruit Feather M0** board setting, matching the PocketPCR's shipped firmware.
