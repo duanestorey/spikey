@@ -80,18 +80,18 @@ All of it is in the `.ino`, in a single `loop()` with no RTOS:
 
 ## Review findings (what to fix)
 
-In priority order. Line numbers refer to the `.ino` at commit `daf77fc` (tag `gaudilabs-v1.02`). Items marked **FIXED (Storey 0.0.1b)** are done on branch `storey-1.0`.
+In priority order. Line numbers refer to the `.ino` at commit `daf77fc` (tag `gaudilabs-v1.02`). Items marked **FIXED (Spikehole 0.0.1b)** are done on branch `storey-1.0`.
 
-1. **FIXED (Storey 0.0.1b).** **No protection against thermal runaway (high).** If the thermistor is disconnected (ADC ≈ 4095) or shorted (ADC ≈ 0), the temperature calculation (~L201–203) produces a very low or NaN reading, and the controller runs the heater at full power indefinitely. Add: limits on the raw ADC value, a NaN check, a maximum temperature cutoff (e.g. >105 °C), and a "heating but temperature not rising" timeout. On any fault, turn the heater off and the fan on, and show an error screen. The block thermistor is the device's only temperature sensor.
-2. **FIXED (Storey 0.0.1b).** **A second run in the same session does only one cycle (high).** `PCRcycle` is set to 1 at power-on and never reset when a run starts (L227). Reset `PCRcycle`, `TEMPi`, `TEMPdif_a[]` and `PIDIntegration` when a run starts.
-3. **Partly fixed (Storey 0.0.1b):** the waits now turn the heater off first; they still block the loop. **Waiting for a button release freezes the controller (medium).** `while(!digitalRead(butPin));` is used everywhere, including during a run (L556). While the button is held, the heater stays at its last PWM value with no temperature control. Replace these waits with a non-blocking edge or debounce check.
+1. **FIXED (Spikehole 0.0.1b).** **No protection against thermal runaway (high).** If the thermistor is disconnected (ADC ≈ 4095) or shorted (ADC ≈ 0), the temperature calculation (~L201–203) produces a very low or NaN reading, and the controller runs the heater at full power indefinitely. Add: limits on the raw ADC value, a NaN check, a maximum temperature cutoff (e.g. >105 °C), and a "heating but temperature not rising" timeout. On any fault, turn the heater off and the fan on, and show an error screen. The block thermistor is the device's only temperature sensor.
+2. **FIXED (Spikehole 0.0.1b).** **A second run in the same session does only one cycle (high).** `PCRcycle` is set to 1 at power-on and never reset when a run starts (L227). Reset `PCRcycle`, `TEMPi`, `TEMPdif_a[]` and `PIDIntegration` when a run starts.
+3. **Partly fixed (Spikehole 0.0.1b):** the waits now turn the heater off first; they still block the loop. **Waiting for a button release freezes the controller (medium).** `while(!digitalRead(butPin));` is used everywhere, including during a run (L556). While the button is held, the heater stays at its last PWM value with no temperature control. Replace these waits with a non-blocking edge or debounce check.
 4. **The I term depends on loop speed (low/medium).** `TEMPi` grows once per loop pass instead of over time; the D term uses 200 ms samples. Changing how long drawing takes changes the control behaviour. Base the PID on a fixed time step (e.g. 100–200 ms) using `millis()`.
 5. **Stop is awkward (low).** "Press to STOP" only works when `counter` is odd, so you have to turn the knob one click first.
 6. **Minor:**
    - The defaults are unusual (denature 120 s per cycle, no 72 °C final extension).
    - The variable `x` in `draw_run_display` is always 0.
-   - ~~"Left Handed Mode" text is always shown on the splash screen.~~ Replaced by a hint (Storey 0.0.1b).
-   - ~~Pressing Cancel reads `settings.value[12]`, one past the end of the array.~~ Fixed (Storey 0.0.1b).
+   - ~~"Left Handed Mode" text is always shown on the splash screen.~~ Replaced by a hint (Spikehole 0.0.1b).
+   - ~~Pressing Cancel reads `settings.value[12]`, one past the end of the array.~~ Fixed (Spikehole 0.0.1b).
    - `SETTING_String` is sized 6 but only 5 entries are filled in.
    - Software SPI to the OLED is slow and makes the loop slower.
 
@@ -99,9 +99,23 @@ There are no tests. If you add logic, keep the pure parts (temperature conversio
 
 ## Changes in this fork
 
-Branch `storey-1.0`, firmware version **Storey 0.0.1b**. Versioning: beta releases are `Storey 0.0.Nb` (N increments each release) until launch at `1.0.0`; each release is tagged `storey-0.0.Nb`. Baseline tag: `gaudilabs-v1.02` (= upstream `daf77fc`). Build size (Feather M0, Adafruit SAMD 1.7.17): 59.6 KB flash (22%).
+### Spikehole 0.0.2b: PCR + RT programs, Config menu, Room temperature
 
-- **Version and splash screen:** a 2 s splash (`SPLASH_MS`) in the small built-in font, centred horizontally and vertically: "PocketPCR" / "by GaudiLabs" / (blank) / "Version" / "Storey 0.0.1b" (`VersionString`). The original splash had no delay, so it was never visible. Holding the button during the splash selects left-handed mode.
+- **Main menu:** Run PCR / Run RT / Config >, in the small font under a plain "Main Menu" title with a separator line (`draw_title()`, also used by Config and Debug). It shares `draw_menu()` with Config.
+- **Config** (`CASE_Config`, `draw_config_display()`): PCR program / RT program / Debug / < Back. PCR and RT open the editor (`CASE_Settings`/`CASE_EditSettings`, generalised with `editType`). Set saves and Cancel discards; both return to Config.
+- **Program types:** `runType` is `RUN_PCR` or `RUN_RT`. The run code goes through the helpers at the end of the sketch (`stepTemp`, `stepTime`, `totalCycles`, `nextStep`, `stepName`, `statsIndex`, `startRun`), so the state machine, the estimate and the statistics work for both.
+  - **PCR:** uses `settings.value[0..10]`, unchanged GaudiLabs layout. Editor items: 0–9 temp/time, 10 cycles, 11 Set, 12 Cancel.
+  - **RT:** a separate `FlashStorage` named `rt_store` (`RTprog`, `RT_MAGIC` "RTP1") with 3 temp/time pairs: **Incubation, Transcribe, Deactivate**. One pass, then the usual auto cool-down. Defaults: Room 10 min / 55 °C 15 min / 85 °C 5 min. Editor items: 0–5, 6 Set, 7 Cancel. Three bars at x = 30/62/94, with no cycle box.
+- **Room temperature** (`TEMP_ROOM` = 0, shown "RT"): turn a temperature below 25 °C to select it (editor value 24). The heater stays off and the timer starts at once, with no ±0.5 °C wait. The fan runs while the block is above `ROOM_FAN_ABOVE` (30 °C). The estimate assumes the next step starts from `ROOM_TEMP_EST` (25 °C). Room steps aren't counted in the ramp statistics. Works in both programs.
+- **Run screen:** title "PCR - n of N" or "RT - Step n of 3"; "Temp: Room / xx.x°C" during Room steps. **Done:** "PCR/RT Done" or "PCR/RT Stopped".
+- **Debug** (`CASE_Debug`, `draw_debug_display()`): three pages, knob = page, button = back. Page 1: runs started/done, last run's estimated vs actual time, overall heat/cool rates. Page 2: PCR per-step ramp count and mean °C/s. Page 3: the same for RT.
+- **Statistics:** `RampStats.step[8]` (0–4 PCR, 5–7 RT); `STATS_MAGIC` bumped to "RAM2".
+
+### Spikehole 0.0.1b
+
+Branch `storey-1.0`. Firmware name: **Spikehole** (renamed from "Storey" at 0.0.2b; the 0.0.1b tag keeps its old name `storey-0.0.1b`, and new tags are `spikehole-0.0.Nb`). Current firmware **Spikehole 0.0.2b**; previous **0.0.1b** (tag `storey-0.0.1b`). Versioning: beta releases are `Spikehole 0.0.Nb` (N increments each release) until launch at `1.0.0`; each release is tagged `spikehole-0.0.Nb`. Baseline tag: `gaudilabs-v1.02` (= upstream `daf77fc`). Build size (Feather M0, Adafruit SAMD 1.7.17): 59.6 KB flash (22%).
+
+- **Version and splash screen:** a 5 s splash (`SPLASH_MS`) in the small built-in font, centred horizontally and vertically: "PocketPCR" (as GaudiLabs writes it on the website/repo; the PCB silkscreen says "Pocket PCR") / "by GaudiLabs" / (blank) / "Version" / "Spikehole 0.0.1b" (`VersionString`). The original splash had no delay, so it was never visible. Holding the button during the splash selects left-handed mode.
 - **Run screen redesign:**
   - Title bar "PCR - n of N" (0 during Init, N during Final), or "Press to STOP PCR" after turning the knob.
   - Rows: "State:"; "Temp: set°C / block°C"; a separator; "Cycle Time:" (seconds left in the current step); "Elapsed:" (h:mm:ss since Run was pressed, from `runStart`); "Remaining:" (h:mm:ss, estimated).

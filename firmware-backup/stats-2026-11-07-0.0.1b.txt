@@ -1,0 +1,8 @@
+Ramp stats saved by Storey/Spikehole 0.0.1b (RAM1 layout), flash 0x0F800, read 2026-11-07
+overall heat/cool rate: 0.916 / 0.838 C/s   ramps heat/cool: 2/2
+  Init       n=  1 mean=1.028 min=1.028 max=1.028 C/s  last +69.8C in 67.9s
+  Denature   n=  0 mean=0.000 min=0.000 max=0.000 C/s  last +0.0C in 0.0s
+  Annealing  n=  1 mean=1.078 min=1.078 max=1.078 C/s  last -38.9C in 36.1s
+  Extension  n=  1 mean=1.068 min=1.068 max=1.068 C/s  last +17.0C in 15.9s
+  Final      n=  1 mean=0.887 min=0.887 max=0.887 C/s  last -16.9C in 19.1s
+runs started/completed: 1/1   last run est/actual: 358s / 212s

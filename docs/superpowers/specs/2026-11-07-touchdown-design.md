@@ -22,7 +22,16 @@ Background on touchdown: the anneal temperature starts high, where only the exac
 3. **Named saved programs.** Names of up to 5 characters (A–Z, 0–9, `-`), entered with the knob, e.g. `XVITA`, `NZYT`, `NZ-RT`. About 10 programs. Run PCR shows a list to pick from.
 4. **Program types.** *PCR* is the current behaviour. *Hold* uses the same 5 bars as 5 steps that each run once, in order. A step with time 0 is skipped, there's no cycle box, and the labels read "Step 1…5". This replaces the owner's current RT workaround (Init = RT, cycles = 1 with den/ann/ext all at 55 °C, Final = 85 °C inactivation).
 
-Done in Storey 0.0.1b (branch `storey-1.0`): items 0 (except the firmware backup), plus the version rename and the heater-off button waits.
+Done in Spikehole 0.0.1b (branch `storey-1.0`): items 0 (except the firmware backup), plus the version rename and the heater-off button waits.
+
+**Spikehole 0.0.2b** delivered roadmap items 2 and 4 in a different form from first planned:
+- Main menu: Run PCR / Run RT / Config.
+- Config: PCR / RT / Debug / Back.
+- A separate **RT program type** (Incubation / Transcribe / Deactivate, one pass). It replaces the "Hold" idea.
+- A **Room temperature** setting ("RT": heater off, timer starts at once).
+- A Debug page for the ramp statistics.
+
+The remaining Settings items (touchdown step size, left-handed mode, cool-down on/off) can go under Config later. **Next: touchdown (item 1), then named programs (item 3).**
 
 Later and optional: non-blocking button handling, and a time-based PID.
 

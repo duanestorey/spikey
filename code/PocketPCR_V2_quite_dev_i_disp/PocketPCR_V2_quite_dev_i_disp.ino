@@ -16,8 +16,8 @@ https://github.com/GaudiLabs/PocketPCR
 
 #include <Fonts/FreeSans9pt7b.h>
 
-const char VersionString[] = "Storey 0.0.1b";   // fork of GaudiLabs PocketPCR V1.02 2020
-#define SPLASH_MS 2000                         // how long the start-up splash is shown
+const char VersionString[] = "Spikehole 0.0.2b";   // fork of GaudiLabs PocketPCR V1.02 2020
+#define SPLASH_MS 5000                         // how long the start-up splash is shown
 
 // These constants won't change. They're used to give names to the pins used:
 const int analogInPin = A2;  // Analog input pin that the temperature sensor is attached to
@@ -58,6 +58,8 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT,
 #define CASE_Run 4
 #define CASE_Done 5
 #define CASE_Error 6
+#define CASE_Config 7
+#define CASE_Debug 8
 
 // Safety cutoff
 #define ADC_MIN 20            // raw ADC at/below this: thermistor shorted
@@ -103,7 +105,7 @@ FlashStorage(my_flash_store, EEprom);
 
 // Measured ramp statistics, kept in flash across power cycles (reset by a firmware upload).
 // Saved once per run (when it ends) to spare the flash. Used for the time-left estimate and for tuning.
-#define STATS_MAGIC 0x52414D31   // "RAM1": bump if the layout changes
+#define STATS_MAGIC 0x52414D32   // "RAM2": bump if the layout changes
 typedef struct {
   uint32_t n;          // ramps measured into this step
   float meanRate;      // mean °C/s (running mean)
@@ -115,7 +117,7 @@ typedef struct {
   uint32_t magic;
   float heatRate, coolRate;      // overall blended rates (°C/s), fallback when a step has no data
   uint32_t rampsHeat, rampsCool;
-  RampStep step[5];              // by target step: 0 Init, 1 Denature, 2 Annealing, 3 Extension, 4 Final
+  RampStep step[8];              // by target step: 0-4 PCR (Init, Denature, Annealing, Extension, Final), 5-7 RT (Incubation, Transcribe, Deactivate)
   uint32_t runsStarted, runsCompleted;
   uint32_t lastEstSecs;          // last completed run: estimate made at the start
   uint32_t lastActualSecs;       // last completed run: actual duration
@@ -129,6 +131,28 @@ float runHeatSecs = 0, runCoolSecs = 0, runHeatDeg = 0, runCoolDeg = 0;
 uint32_t runTotalSecs = 0;
 uint32_t estAtStart = 0;
 EEprom settings;
+
+// Program types. PCR uses `settings` (GaudiLabs layout), RT uses its own store.
+#define RUN_PCR 0
+#define RUN_RT 1
+int runType = RUN_PCR;     // program being run
+int editType = RUN_PCR;    // program being edited in Config
+
+// "Room" temperature: lowest selectable value (shown "RT"). Heater off, step timer starts at once.
+#define TEMP_ROOM 0
+#define TEMP_ROOM_COUNTER 24     // editor value just below the 25 °C minimum that means Room
+#define ROOM_FAN_ABOVE 30.0      // during a Room step, run the fan while the block is warmer than this
+#define ROOM_TEMP_EST 25.0       // assumed block temperature after a Room step (for the estimate)
+bool roomStep = false;
+
+// RT program: Incubation, Transcribe, Deactivate (temp/time pairs), one pass, then auto cool-down
+#define RT_MAGIC 0x52545031      // "RTP1"
+typedef struct {
+  uint32_t magic;
+  int value[6];
+} RTprog;
+FlashStorage(rt_store, RTprog);
+RTprog rtprog;
   
 
 int sensorValue = 0;        // value read from the sesnor
@@ -231,6 +255,15 @@ if (stats.magic != STATS_MAGIC) {     // first boot after upload: start fresh (w
   stats.coolRate = COOL_RATE_DEFAULT;
 }
 
+rtprog=rt_store.read();
+if (rtprog.magic != RT_MAGIC) {      // first boot after upload: RT defaults
+  rtprog.magic = RT_MAGIC;
+  rtprog.value[0] = TEMP_ROOM; rtprog.value[1] = 600;   // Incubation: room temp, 10 min
+  rtprog.value[2] = 55;        rtprog.value[3] = 900;   // Transcribe: 55 °C, 15 min
+  rtprog.value[4] = 85;        rtprog.value[5] = 300;   // Deactivate: 85 °C, 5 min
+  rt_store.write(rtprog);
+}
+
 if (settings.value[11]==0)
 {
 settings.value[0] = 94; 
@@ -290,70 +323,98 @@ switch (caseUX) {
 
 case CASE_Main:
 
-  
-   if (counter>1) counter=0;
-   if (counter<0) counter=1;
+   if (counter>2) counter=0;
+   if (counter<0) counter=2;
    MenuItem = counter;
    draw_main_display();
-   
+
    if (!digitalRead(butPin)) {waitRelease();
-
-   if (MenuItem==0) {caseUX=CASE_Run;casePCR=PCR_set; PCRstate=0; counter=0; coolInit=false;
-     // reset run state so back-to-back runs start clean
-     PCRcycle=1; TEMPi=0; TEMPd=0; PIDIntegration=false; noHeatTiming=false; runStart=millis();
-     runCompleted=false; estAtStart=0; stats.runsStarted++;
-     runHeatN=0; runCoolN=0; runHeatSecs=0; runCoolSecs=0; runHeatDeg=0; runCoolDeg=0;
-     for (int i=0;i<10;i++) TEMPdif_a[i]=0;}
-   if (MenuItem==1) {caseUX=CASE_Settings; counter=0;}
-
+     if (MenuItem==0) startRun(RUN_PCR);
+     else if (MenuItem==1) startRun(RUN_RT);
+     else {caseUX=CASE_Config; counter=0;}
    }
-   
-    break;
-    
-case CASE_Settings:
 
-    if (counter>12) counter=0;
-    if (counter<0) counter=12;
+    break;
+
+case CASE_Config:
+  {
+    if (counter>3) counter=0;
+    if (counter<0) counter=3;
+    int item = counter;
+    draw_config_display(item);
+    if (!digitalRead(butPin)) {waitRelease();
+      if (item==0 || item==1) {editType = (item==0) ? RUN_PCR : RUN_RT; caseUX=CASE_Settings; counter=0;}
+      else if (item==2) {caseUX=CASE_Debug; counter=0;}
+      else {caseUX=CASE_Main; counter=2;}
+    }
+  }
+    break;
+
+case CASE_Debug:
+
+    if (counter>2) counter=0;
+    if (counter<0) counter=2;
+    draw_debug_display(counter);
+    if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Config; counter=2;}
+
+    break;
+
+case CASE_Settings:
+  {
+    int* ev = progVals(editType);
+    int last = lastValItem(editType);
+    if (counter>last+2) counter=0;
+    if (counter<0) counter=last+2;
     MenuItem = counter;
-    if ((MenuItem%2==1)&&(settings.value[MenuItem]>90)) minuteMode=true; else minuteMode=false;
-    if (!digitalRead(butPin)) 
+    if ((MenuItem<=last)&&(MenuItem%2==1)&&(ev[MenuItem]>90)) minuteMode=true; else minuteMode=false;
+    if (!digitalRead(butPin))
     {waitRelease(); caseUX=CASE_EditSettings;
-    if (MenuItem<11) {if (minuteMode) counter=settings.value[MenuItem]/60; else counter=settings.value[MenuItem];}}  // 11/12 = Set/Cancel, no value
+     if (MenuItem<=last) {                       // last+1 / last+2 = Set / Cancel, no value
+       if (isTempItem(editType,MenuItem)) counter = (ev[MenuItem]==TEMP_ROOM) ? TEMP_ROOM_COUNTER : ev[MenuItem];
+       else if (minuteMode) counter=ev[MenuItem]/60; else counter=ev[MenuItem];
+     }
+    }
     draw_setup_display();
-    
+  }
     break;
 
 case CASE_EditSettings:
+  {
+    int* ev = progVals(editType);
+    int last = lastValItem(editType);
 
-    
-    if (MenuItem%2==0)
-     {if (MenuItem==10) 
-         {if (counter<1) counter=1;
-          if (counter>99) counter=99;}
-     else 
-        {if (counter<25) counter=25;
-        if (counter>99) counter=99;}
-     
-     } // Temp Menu
-     
-     else
+    if (MenuItem==last+1) {                      // Set: save and back to Config
+      if (editType==RUN_RT) rt_store.write(rtprog); else my_flash_store.write(settings);
+      caseUX=CASE_Config; counter=editType; break;
+    }
+    if (MenuItem==last+2) {                      // Cancel: reload and back to Config
+      if (editType==RUN_RT) rtprog=rt_store.read(); else settings=my_flash_store.read();
+      caseUX=CASE_Config; counter=editType; break;
+    }
+
+    if (isTempItem(editType,MenuItem))
+       {if (counter<TEMP_ROOM_COUNTER) counter=TEMP_ROOM_COUNTER;   // 24 = Room
+        if (counter>99) counter=99;
+        ev[MenuItem] = (counter==TEMP_ROOM_COUNTER) ? TEMP_ROOM : counter;}
+    else if ((editType==RUN_PCR)&&(MenuItem==10))                   // PCR cycle count
+       {if (counter<1) counter=1;
+        if (counter>99) counter=99;
+        ev[MenuItem]=counter;}
+    else                                                             // time
       {if (minuteMode)
        {if (counter<2) {minuteMode=false; counter=90;}
-       }  //Minut Mode
+       }  //Minute Mode
        else
        {
        if (counter>90) {minuteMode=true; counter=2;}
        if (counter<0) {counter=0;}
-       } //not Minut Mode
-      } // Time Menu
-    
-    if (MenuItem==11) {caseUX=CASE_Main;   my_flash_store.write(settings);}
-    if (MenuItem==12) {caseUX=CASE_Main;  settings=my_flash_store.read();}
+       } //not Minute Mode
+       if (minuteMode) ev[MenuItem]=counter*60; else ev[MenuItem]=counter;
+      }
 
-    if (MenuItem<11) {if (minuteMode) settings.value[MenuItem]=counter*60; else settings.value[MenuItem]=counter;}
     if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Settings;counter=MenuItem;}
     draw_setup_display();
-    
+  }
     break;
 
 case CASE_Run:
@@ -375,12 +436,14 @@ case CASE_Run:
     switch (casePCR) {
 
     case PCR_set:
-    TEMPset=settings.value[PCRstate*2];
-    TIMEcontrol=settings.value[1+PCRstate*2];
+    roomStep = (stepTemp(PCRstate)==TEMP_ROOM);
+    TEMPset = roomStep ? ROOM_TEMP_EST : stepTemp(PCRstate);
+    TIMEcontrol=stepTime(PCRstate);
     PIDIntegration=false;
     rampStartT=temperature_mean; rampStartMs=millis();
     if ((PCRstate==0) && (estAtStart==0)) estAtStart=estimateSecondsLeft();   // casePCR is still PCR_set here
-    casePCR=PCR_transition;
+    if (roomStep) {TEMPcontrol=0; TIMEclick=millis(); casePCR=PCR_time;}    // Room: no ramp, timer starts now
+    else casePCR=PCR_transition;
     break;
 
 
@@ -394,25 +457,23 @@ case CASE_Run:
 
 
     case PCR_time:
-    runPID();
-    TIMEcontrol=settings.value[1+PCRstate*2]-(millis()-TIMEclick)/1000;
+    if (roomStep) {                               // Room: heater off, fan only while the block is warm
+      TEMPcontrol=0;
+      if (temperature_mean > ROOM_FAN_ABOVE) analogWrite(fanPin,255);
+    } else runPID();
+    TIMEcontrol=stepTime(PCRstate)-(millis()-TIMEclick)/1000;
     draw_run_display();
 
-    if (TIMEcontrol<=0) {
-      if (PCRstate==4) {
+    if ((TIMEcontrol<=0)&&(caseUX==CASE_Run)) {
+      int cyc=PCRcycle;
+      int nx=nextStep(PCRstate,cyc);
+      if (nx<0) {
         caseUX=CASE_Done;
         runCompleted=true;
         stats.runsCompleted++;
         stats.lastEstSecs=estAtStart;
         stats.lastActualSecs=(millis()-runStart)/1000;
-      }
-    if (PCRstate==3)
-    {PCRstate=1;
-    PCRcycle++;
-    if (PCRcycle>settings.value[10]) PCRstate=4;
-    } else
-    {PCRstate++;};
-    casePCR=PCR_set;
+      } else {PCRstate=nx; PCRcycle=cyc; casePCR=PCR_set;}
     }
     break;
 
@@ -456,7 +517,7 @@ case CASE_Done:
     draw_done_display();
 
 
-if (!digitalRead(butPin)) {waitRelease(); coolActive=false; caseUX=CASE_Main;counter=MenuItem;}
+if (!digitalRead(butPin)) {waitRelease(); coolActive=false; caseUX=CASE_Main; counter=runType;}
 
 break;
 
@@ -497,13 +558,15 @@ default:
 
 
 
-void draw_value_box(int x, int y, int val, bool highlight,bool edit)
+void draw_value_box(int x, int y, int val, bool highlight,bool edit,bool noShift=false)
 { int shift;
+  bool room = (val==TEMP_ROOM);
+  if (room) val = TEMP_ROOM_COUNTER;          // draw Room at the height of 24 °C
 
-if ((val<46)&&(x>22)&&(x<100)) shift=-13; else shift=0;
+if ((!noShift)&&(val<46)&&(x>22)&&(x<100)) shift=-13; else shift=0;   // PCR only: dodge the cycles box
 
   display.drawRect(x-3,y+2-val/2,17,val/2-1,1);
-  
+
 if (highlight&&!edit){
   display.fillRect(x-3,y+2-val/2+shift,17,11,1);
   display.setTextColor(0);
@@ -511,7 +574,7 @@ if (highlight&&!edit){
 if (highlight&&edit) display.drawRect(x-2,y+2-val/2+shift,15,11,1);
 
  display.setCursor(x,y-val/2+4+shift);
- display.println(val);
+ if (room) display.println("RT"); else display.println(val);
  display.setTextColor(1);
 };
 
@@ -543,139 +606,146 @@ if (highlight&&edit){
 }
 
 void draw_setup_display()
-
 {
-  
-display.clearDisplay(); 
+  int* ev = progVals(editType);
+  int last = lastValItem(editType);
+  bool editing = (caseUX==CASE_EditSettings);
 
- if (MenuItem<11) {
-  
-display.setCursor(5,0);
-//display.print("Set ");
+  display.clearDisplay();
+  display.setFont();
 
-if (MenuItem<10){
-display.print(SETTING_String[MenuItem/2]);
-if (MenuItem%2==0) {display.print(" Temp. [");display.print("\xA7");display.print("C]");} else {display.print(" Time "); if (minuteMode) display.print("[min]"); else display.print("[s]");  }
-} else display.print("No of cycles");
- } else 
-
- {
- if (MenuItem==12)   // Set or Cancel
- {
-
- display.setCursor(34,0);
- display.println("Set");
- display.fillRect(70,0,42,9,1);
- display.setTextColor(0);
- display.setCursor(75,1);
- display.println("Cancel");
- display.setTextColor(1);
- } else
-
- {
-  display.fillRect(30,0,25,9,1);
- display.setTextColor(0);
- display.setCursor(34,1);
- display.println("Set");
- display.setTextColor(1);
- display.setCursor(75,0);
- display.println("Cancel");
- 
+  // Header: what is selected, or the Set / Cancel choice
+  if (MenuItem<=last) {
+    // centred, max 21 chars (e.g. "Incubation Temp. [°C]")
+    char hdr[24];
+    const char* nm = stepName(editType, MenuItem/2);
+    if ((editType==RUN_PCR)&&(MenuItem==10)) snprintf(hdr, sizeof(hdr), "No of cycles");
+    else if (MenuItem%2==0) {
+      if (ev[MenuItem]==TEMP_ROOM) snprintf(hdr, sizeof(hdr), "%s Temp. [RT]", nm);
+      else snprintf(hdr, sizeof(hdr), "%s Temp. [\xA7""C]", nm);
+    } else snprintf(hdr, sizeof(hdr), "%s Time %s", nm, minuteMode ? "[min]" : "[s]");
+    drawCentered(0, hdr);
+  } else if (MenuItem==last+2) {   // Cancel highlighted
+    display.setCursor(34,0);
+    display.println("Set");
+    display.fillRect(70,0,42,9,1);
+    display.setTextColor(0);
+    display.setCursor(75,1);
+    display.println("Cancel");
+    display.setTextColor(1);
+  } else {                         // Set highlighted
+    display.fillRect(30,0,25,9,1);
+    display.setTextColor(0);
+    display.setCursor(34,1);
+    display.println("Set");
+    display.setTextColor(1);
+    display.setCursor(75,0);
+    display.println("Cancel");
   }
-}
 
+  if (editType==RUN_PCR) {
+    const int xs[5] = {21,43,63,83,105};
+    for (int i=0;i<5;i++) draw_value_box(xs[i],55,ev[i*2],MenuItem==i*2,editing);
 
-draw_value_box (21,55,settings.value[0],MenuItem==0,caseUX==CASE_EditSettings);
-draw_value_box (43,55,settings.value[2],MenuItem==2,caseUX==CASE_EditSettings);
-draw_value_box (63,55,settings.value[4],MenuItem==4,caseUX==CASE_EditSettings);
-draw_value_box (83,55,settings.value[6],MenuItem==6,caseUX==CASE_EditSettings);
-draw_value_box (105,55,settings.value[8],MenuItem==8,caseUX==CASE_EditSettings);
+    // cycles box
+    display.drawRect(38,45,61,11,1);
+    display.fillRect(38+1,45+1,61-2,11-2,0);
+    if ((MenuItem==10)&&!editing){
+      display.fillRect(56,45,25,11,1);
+      display.setTextColor(0);
+    }
+    if ((MenuItem==10)&&editing)  display.drawRect(56,45,25,11,1);
+    display.setCursor(60,47);
+    display.print(ev[10]);
+    display.print("x");
+    display.setTextColor(1);
 
-
-display.drawRect(38,45,61,11,1);
-display.fillRect(38+1,45+1,61-2,11-2,0);
-
-
-if ((MenuItem==10)&&!(caseUX==CASE_EditSettings)){
-  display.fillRect(56,45,25,11,1);
-  display.setTextColor(0);
-}
-if ((MenuItem==10)&&(caseUX==CASE_EditSettings))  display.drawRect(56,45,25,11,1);
-
- display.setCursor(60,47);
- display.print(settings.value[10]);
- display.print("x");
- display.setTextColor(1);
-
- 
-
-draw_value (21,57,settings.value[1],MenuItem==1,caseUX==CASE_EditSettings);
-draw_value (43,57,settings.value[3],MenuItem==3,caseUX==CASE_EditSettings);
-draw_value (63,57,settings.value[5],MenuItem==5,caseUX==CASE_EditSettings);
-draw_value (83,57,settings.value[7],MenuItem==7,caseUX==CASE_EditSettings);
-draw_value (105,57,settings.value[9],MenuItem==9,caseUX==CASE_EditSettings);
-
-   
+    for (int i=0;i<5;i++) draw_value(xs[i],57,ev[i*2+1],MenuItem==i*2+1,editing);
+  } else {
+    const int xs[3] = {30,62,94};
+    for (int i=0;i<3;i++) draw_value_box(xs[i],55,ev[i*2],MenuItem==i*2,editing,true);
+    for (int i=0;i<3;i++) draw_value(xs[i],57,ev[i*2+1],MenuItem==i*2+1,editing);
+  }
 
   display.display();
-  
- // Serial.println (encoder0Pos, DEC);
+}
 
-    // Serial.println(Enc_counter,DEC);
-   // Serial.print(millis());
-   //    Serial.print(" :");
-  //   Serial.println(temperature,DEC);
-  
-  
+// Plain centred title with a separator line under it (menus and Debug)
+void draw_title(const char* title)
+{
+  display.setTextColor(1);
+  drawCentered(1, title);
+  display.drawLine(0,11,127,11,1);
+}
+
+// Menu list in the small font under a plain title + separator (main menu and Config)
+void draw_menu(const char* title, const char* const* items, int n, int sel)
+{
+  display.clearDisplay();
+  display.setFont();
+  draw_title(title);
+  for (int i=0;i<n;i++) {
+    int y = 16 + i*12;
+    if (sel==i) {display.fillRect(0,y-2,128,11,1); display.setTextColor(0);}
+    else display.setTextColor(1);
+    drawCentered(y, items[i]);
   }
+  display.setTextColor(1);
+  display.display();
+}
 
 void draw_main_display()
 {
-display.clearDisplay(); 
+  static const char* const items[3] = {"Run PCR", "Run RT", "Config >"};
+  draw_menu("Main Menu", items, 3, MenuItem);
+}
 
-   display.setFont(&FreeSans9pt7b);
+void draw_config_display(int item)
+{
+  static const char* const items[4] = {"PCR program", "RT program", "Debug", "< Back"};
+  draw_menu("Config", items, 4, item);
+}
 
-
-   if (MenuItem==0)   // Set or Cancel
- {
-
-  display.fillRect(21,10,86,25,1);
- display.setTextColor(0);
- display.setCursor(26,28);
- display.println("Run PCR");
-
- //display.fillRect(21,38,86,25,1);
- display.setTextColor(1);
- display.setCursor(40,55);
- display.println("Setup");
- } else
-
- {
- // display.fillRect(21,10,86,25,1);
- display.setTextColor(1);
- display.setCursor(26,28);
- display.println("Run PCR");
-
- display.fillRect(21,38,86,25,1);
- display.setTextColor(0);
- display.setCursor(40,55);
- display.println("Setup");
- 
-  }
+// Debug pages: saved ramp statistics (knob = page, button = back)
+void draw_debug_display(int page)
+{
+  char buf[24];
+  display.clearDisplay();
   display.setFont();
+  const char* titles[3] = {"Debug 1/3", "Debug 2/3 PCR", "Debug 3/3 RT"};
+  draw_title(titles[page]);
 
-   display.setTextColor(1);
-
-    display.display();
-
+  if (page==0) {
+    display.setCursor(0,14); display.print("Runs started: "); display.print(stats.runsStarted);
+    display.setCursor(0,23); display.print("Runs done:    "); display.print(stats.runsCompleted);
+    formatHMS(buf, sizeof(buf), stats.lastEstSecs);
+    display.setCursor(0,32); display.print("Last est: "); display.print(buf);
+    formatHMS(buf, sizeof(buf), stats.lastActualSecs);
+    display.setCursor(0,41); display.print("Last act: "); display.print(buf);
+    display.setCursor(0,50); display.print("Heat/Cool: ");
+    display.print(stats.heatRate,2); display.print("/"); display.print(stats.coolRate,2);
+  } else {
+    int type = (page==1) ? RUN_PCR : RUN_RT;
+    int base = (page==1) ? 0 : 5;
+    for (int i=0;i<numSteps(type);i++) {
+      RampStep &rs = stats.step[base+i];
+      display.setCursor(0,14+i*9);
+      display.print(stepName(type,i));
+      display.setCursor(66,14+i*9);
+      display.print("n"); display.print(rs.n);
+      display.setCursor(96,14+i*9);
+      if (rs.n>0) display.print(rs.meanRate,2); else display.print("--");
+    }
   }
+  display.display();
+}
 
 
 void draw_run_display()
 {
   char buf[24];
-  int total = settings.value[10];
-  // cycle shown in the title: 0 during Init, 1..N while cycling, N during Final
+  int total = totalCycles();
+  // PCR title cycle: 0 during Init, 1..N while cycling, N during Final
   int shownCycle = (PCRstate==0) ? 0 : ((PCRcycle>total) ? total : PCRcycle);
 
   display.clearDisplay();
@@ -685,23 +755,24 @@ void draw_run_display()
   display.fillRect(0,0,128,11,1);
   display.setTextColor(0);
   if (counter%2==0) {
-    snprintf(buf, sizeof(buf), "PCR - %d of %d", shownCycle, total);
+    if (runType==RUN_RT) snprintf(buf, sizeof(buf), "RT - Step %d of %d", PCRstate+1, numSteps(RUN_RT));
+    else snprintf(buf, sizeof(buf), "PCR - %d of %d", shownCycle, total);
     drawCentered(2, buf);
   } else {
-    drawCentered(2, "Press to STOP PCR");
+    drawCentered(2, (runType==RUN_RT) ? "Press to STOP RT" : "Press to STOP PCR");
     if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Done; counter=MenuItem;}
   }
   display.setTextColor(1);
 
   display.setCursor(0,14);
   display.print("State: ");
-  display.print(SETTING_String[PCRstate]);
+  display.print(stepName(runType,PCRstate));
 
   // Temp: set / block
   display.setCursor(0,23);
   display.print("Temp: ");
-  display.print(TEMPset,1);
-  display.print("\xA7""C / ");
+  if (roomStep) display.print("Room / ");
+  else {display.print(TEMPset,1); display.print("\xA7""C / ");}
   display.print(temperature_mean,1);
   display.print("\xA7""C");
 
@@ -865,13 +936,14 @@ void formatHMS(char* buf, int len, unsigned long secs)
   snprintf(buf, len, "%lu:%02lu:%02lu", secs/3600, (secs/60)%60, secs%60);
 }
 
-// Seconds to ramp from one temperature to another into step st:
-// use that step's measured mean rate if we have one in the same direction, else the overall rate
-float rampSeconds(float from, float to, int st)
+// Seconds to ramp from `from` to a step's raw target temperature, for step st of the running program:
+// that step's measured mean rate if we have one in the same direction, else the overall rate. Room = 0 s.
+float rampSeconds(float from, int toRaw, int st)
 {
-  float d = to - from;
+  if (toRaw == TEMP_ROOM) return 0;
+  float d = toRaw - from;
   if (fabs(d) < 0.01) return 0;
-  RampStep &rs = stats.step[st];
+  RampStep &rs = stats.step[statsIndex(st)];
   float rate;
   if ((rs.n > 0) && ((rs.lastDelta > 0) == (d > 0)) && (rs.meanRate > 0)) rate = rs.meanRate;
   else rate = (d > 0) ? stats.heatRate : stats.coolRate;
@@ -891,7 +963,7 @@ void learnRampRate()
   if (d > 0) { stats.heatRate = (stats.heatRate + r)/2; stats.rampsHeat++; runHeatN++; runHeatSecs += secs; runHeatDeg += d; }
   else       { stats.coolRate = (stats.coolRate + r)/2; stats.rampsCool++; runCoolN++; runCoolSecs += secs; runCoolDeg -= d; }
 
-  RampStep &rs = stats.step[PCRstate];
+  RampStep &rs = stats.step[statsIndex(PCRstate)];
   rs.n++;
   rs.meanRate += (r - rs.meanRate) / rs.n;
   if ((rs.n == 1) || (r < rs.minRate)) rs.minRate = r;
@@ -908,9 +980,9 @@ void printStats()
   Serial.print("last run est/actual s: "); Serial.print(stats.lastEstSecs); Serial.print("/"); Serial.println(stats.lastActualSecs);
   Serial.print("overall heat/cool C/s: "); Serial.print(stats.heatRate,3); Serial.print("/"); Serial.print(stats.coolRate,3);
   Serial.print("  ramps: "); Serial.print(stats.rampsHeat); Serial.print("/"); Serial.println(stats.rampsCool);
-  for (int i=0;i<5;i++) {
+  for (int i=0;i<8;i++) {
     RampStep &rs = stats.step[i];
-    Serial.print(SETTING_String[i]); Serial.print(": n="); Serial.print(rs.n);
+    Serial.print(i<5 ? "PCR " : "RT "); Serial.print(i<5 ? stepName(RUN_PCR,i) : stepName(RUN_RT,i-5)); Serial.print(": n="); Serial.print(rs.n);
     Serial.print(" mean="); Serial.print(rs.meanRate,3); Serial.print(" min="); Serial.print(rs.minRate,3);
     Serial.print(" max="); Serial.print(rs.maxRate,3); Serial.print(" C/s  last "); Serial.print(rs.lastDelta,1);
     Serial.print("C in "); Serial.print(rs.lastSecs,1); Serial.println("s");
@@ -923,16 +995,16 @@ unsigned long estimateSecondsLeft()
 {
   float secs;
   if (casePCR == PCR_time) secs = (TIMEcontrol > 0) ? TIMEcontrol : 0;
-  else secs = rampSeconds(temperature_mean, TEMPset, PCRstate) + settings.value[1+PCRstate*2];
+  else secs = (roomStep ? 0 : rampSeconds(temperature_mean, stepTemp(PCRstate), PCRstate)) + stepTime(PCRstate);
 
-  int st = PCRstate, cyc = PCRcycle, total = settings.value[10];
-  float prevT = TEMPset;
-  while (st != 4) {
-    if (st == 3) { st = 1; cyc++; if (cyc > total) st = 4; }
-    else st++;
-    float t = settings.value[st*2];
-    secs += rampSeconds(prevT, t, st) + settings.value[1+st*2];
-    prevT = t;
+  int st = PCRstate, cyc = PCRcycle;
+  float prevT = assumedTemp(stepTemp(st));
+  while (true) {
+    int nx = nextStep(st, cyc);
+    if (nx < 0) break;
+    st = nx;
+    secs += rampSeconds(prevT, stepTemp(st), st) + stepTime(st);
+    prevT = assumedTemp(stepTemp(st));
   }
   return (unsigned long)secs;
 }
@@ -957,7 +1029,8 @@ void draw_done_display()
 
   display.fillRect(0,0,128,11,1);
   display.setTextColor(0);
-  drawCentered(2, runCompleted ? "PCR Done" : "PCR Stopped");
+  if (runType==RUN_RT) drawCentered(2, runCompleted ? "RT Done" : "RT Stopped");
+  else drawCentered(2, runCompleted ? "PCR Done" : "PCR Stopped");
   display.setTextColor(1);
 
   formatHMS(buf, sizeof(buf), runTotalSecs);
@@ -980,4 +1053,42 @@ void draw_done_display()
   display.print("\xA7""C");
 
   display.display();
+}
+
+// ---- Program helpers (PCR / RT) ----
+int* progVals(int type) { return (type==RUN_RT) ? rtprog.value : settings.value; }
+int numSteps(int type) { return (type==RUN_RT) ? 3 : 5; }
+int lastValItem(int type) { return (type==RUN_RT) ? 5 : 10; }    // last editable item; then Set, Cancel
+bool isTempItem(int type, int item) { return (item%2==0) && !((type==RUN_PCR)&&(item==10)); }
+int stepTemp(int st) { return progVals(runType)[st*2]; }
+int stepTime(int st) { return progVals(runType)[st*2+1]; }
+int totalCycles() { return (runType==RUN_RT) ? 1 : settings.value[10]; }
+int statsIndex(int st) { return (runType==RUN_RT) ? 5+st : st; }
+float assumedTemp(int raw) { return (raw==TEMP_ROOM) ? ROOM_TEMP_EST : raw; }
+
+const char* stepName(int type, int st)
+{
+  static const char* pcr[5] = {"Init", "Denature", "Annealing", "Extension", "Final"};
+  static const char* rt[3]  = {"Incubation", "Transcribe", "Deactivate"};
+  return (type==RUN_RT) ? rt[st] : pcr[st];
+}
+
+// Step after st in the running program (cyc is the PCR cycle, updated), or -1 when the run is over
+int nextStep(int st, int &cyc)
+{
+  if (runType==RUN_RT) return (st < 2) ? st+1 : -1;
+  if (st==4) return -1;
+  if (st==3) { cyc++; return (cyc > settings.value[10]) ? 4 : 1; }
+  return st+1;
+}
+
+// Start a run of the given program type, with all run state reset
+void startRun(int type)
+{
+  runType=type;
+  caseUX=CASE_Run; casePCR=PCR_set; PCRstate=0; counter=0; coolInit=false; roomStep=false;
+  PCRcycle=1; TEMPi=0; TEMPd=0; PIDIntegration=false; noHeatTiming=false; runStart=millis();
+  runCompleted=false; estAtStart=0; stats.runsStarted++;
+  runHeatN=0; runCoolN=0; runHeatSecs=0; runCoolSecs=0; runHeatDeg=0; runCoolDeg=0;
+  for (int i=0;i<10;i++) TEMPdif_a[i]=0;
 }
