@@ -16,7 +16,7 @@ https://github.com/GaudiLabs/PocketPCR
 
 #include <Fonts/FreeSans9pt7b.h>
 
-const char VersionString[] = "Spikehole 0.0.2b";   // fork of GaudiLabs PocketPCR V1.02 2020
+const char VersionString[] = "Spikehole 0.0.5b";   // fork of GaudiLabs PocketPCR V1.02 2020
 #define SPLASH_MS 5000                         // how long the start-up splash is shown
 
 // These constants won't change. They're used to give names to the pins used:
@@ -99,7 +99,16 @@ int SETTING_cycles = 20;
 
 typedef struct {
 int value[SETTING_Size*2];
+int tdStart;          // touchdown: anneal START temp (value[4] is the anneal END temp)
 } EEprom;
+
+// Touchdown PCR: anneal starts at tdStart and drops TD_STEP °C per cycle until it reaches value[4],
+// then stays there. value[10] is the TOTAL cycle count (touchdown included). Off when tdStart <= value[4]
+// (or end is Room). The editor keeps value[10] >= minCycles() so the touchdown always completes.
+#define TD_STEP 1
+#define TD_START_DEFAULT 63
+int annealPhase = 0;      // editing the Annealing temp: 0 = start, 1 = end
+bool tdLinked = false;    // touchdown was off when editing began: end follows start
 
 FlashStorage(my_flash_store, EEprom);
 
@@ -259,30 +268,20 @@ rtprog=rt_store.read();
 if (rtprog.magic != RT_MAGIC) {      // first boot after upload: RT defaults
   rtprog.magic = RT_MAGIC;
   rtprog.value[0] = TEMP_ROOM; rtprog.value[1] = 600;   // Incubation: room temp, 10 min
-  rtprog.value[2] = 55;        rtprog.value[3] = 900;   // Transcribe: 55 °C, 15 min
+  rtprog.value[2] = 55;        rtprog.value[3] = 1200;  // Transcribe: 55 °C, 20 min
   rtprog.value[4] = 85;        rtprog.value[5] = 300;   // Deactivate: 85 °C, 5 min
   rt_store.write(rtprog);
 }
 
-if (settings.value[11]==0)
+if (settings.value[11]==0)            // first boot after upload: default PCR program
 {
-settings.value[0] = 94; 
-settings.value[1] = 60;   
-
-settings.value[2] = 94;      
-settings.value[3] = 120;  
-
-settings.value[4] = 55;      
-settings.value[5] = 80;  
-
-settings.value[6] = 72;      
-settings.value[7] = 40;  
-
-settings.value[8] = 25;      
-settings.value[9] = 180;  
-
-settings.value[10] = 25;  
-
+settings.value[0] = 95;  settings.value[1] = 300;   // Init: 95 °C, 5 min
+settings.value[2] = 94;  settings.value[3] = 30;    // Denature: 94 °C, 30 s
+settings.value[4] = 55;  settings.value[5] = 30;    // Annealing: touchdown 63 -> 55 °C, 30 s
+settings.tdStart = TD_START_DEFAULT;                //   (TD_START_DEFAULT = 63)
+settings.value[6] = 72;  settings.value[7] = 30;    // Extension: 72 °C, 30 s
+settings.value[8] = 72;  settings.value[9] = 300;   // Final extension: 72 °C, 5 min
+settings.value[10] = 35;                            // total cycles (touchdown included)
 
 settings.value[11]=1;
 my_flash_store.write(settings);
@@ -370,7 +369,11 @@ case CASE_Settings:
     if (!digitalRead(butPin))
     {waitRelease(); caseUX=CASE_EditSettings;
      if (MenuItem<=last) {                       // last+1 / last+2 = Set / Cancel, no value
-       if (isTempItem(editType,MenuItem)) counter = (ev[MenuItem]==TEMP_ROOM) ? TEMP_ROOM_COUNTER : ev[MenuItem];
+       if (isAnnealItem()) {                     // touchdown-aware: edit the start first
+         annealPhase=0; tdLinked=!tdOn();
+         counter = tdOn() ? settings.tdStart : ((settings.value[4]==TEMP_ROOM) ? 25 : settings.value[4]);
+       }
+       else if (isTempItem(editType,MenuItem)) counter = (ev[MenuItem]==TEMP_ROOM) ? TEMP_ROOM_COUNTER : ev[MenuItem];
        else if (minuteMode) counter=ev[MenuItem]/60; else counter=ev[MenuItem];
      }
     }
@@ -392,12 +395,33 @@ case CASE_EditSettings:
       caseUX=CASE_Config; counter=editType; break;
     }
 
+    if (isAnnealItem()) {
+      if (annealPhase==0) {                                          // start: 25..99
+        if (counter<25) counter=25;
+        if (counter>99) counter=99;
+        settings.tdStart=counter;
+        if (tdLinked) settings.value[4]=counter;                     // touchdown off: end follows start
+        else if ((settings.value[4]!=TEMP_ROOM)&&(settings.value[4]>counter)) settings.value[4]=counter;
+        if (settings.value[10]<minCycles()) settings.value[10]=minCycles();   // touchdown needs more cycles
+        if (!digitalRead(butPin)) {waitRelease(); annealPhase=1;
+          counter=(settings.value[4]==TEMP_ROOM) ? TEMP_ROOM_COUNTER : settings.value[4];}
+      } else {                                                       // end: Room..start
+        if (counter<TEMP_ROOM_COUNTER) counter=TEMP_ROOM_COUNTER;
+        if (counter>settings.tdStart) counter=settings.tdStart;
+        settings.value[4] = (counter==TEMP_ROOM_COUNTER) ? TEMP_ROOM : counter;
+        if (settings.value[10]<minCycles()) settings.value[10]=minCycles();   // touchdown needs more cycles
+        if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Settings; counter=MenuItem;}
+      }
+      draw_setup_display();
+      break;
+    }
+
     if (isTempItem(editType,MenuItem))
        {if (counter<TEMP_ROOM_COUNTER) counter=TEMP_ROOM_COUNTER;   // 24 = Room
         if (counter>99) counter=99;
         ev[MenuItem] = (counter==TEMP_ROOM_COUNTER) ? TEMP_ROOM : counter;}
-    else if ((editType==RUN_PCR)&&(MenuItem==10))                   // PCR cycle count
-       {if (counter<1) counter=1;
+    else if ((editType==RUN_PCR)&&(MenuItem==10))                   // PCR cycle count (total, touchdown included)
+       {if (counter<minCycles()) counter=minCycles();                // never shorter than a full touchdown
         if (counter>99) counter=99;
         ev[MenuItem]=counter;}
     else                                                             // time
@@ -620,6 +644,9 @@ void draw_setup_display()
     char hdr[24];
     const char* nm = stepName(editType, MenuItem/2);
     if ((editType==RUN_PCR)&&(MenuItem==10)) snprintf(hdr, sizeof(hdr), "No of cycles");
+    else if (isAnnealItem() && editing && annealPhase==0) snprintf(hdr, sizeof(hdr), "Anneal start [\xA7""C]");
+    else if (isAnnealItem() && editing) snprintf(hdr, sizeof(hdr), (settings.value[4]==TEMP_ROOM) ? "Anneal end [RT]" : "Anneal end [\xA7""C]");
+    else if (isAnnealItem() && tdOn()) snprintf(hdr, sizeof(hdr), "Annealing %d>%d [\xA7""C]", settings.tdStart, settings.value[4]);
     else if (MenuItem%2==0) {
       if (ev[MenuItem]==TEMP_ROOM) snprintf(hdr, sizeof(hdr), "%s Temp. [RT]", nm);
       else snprintf(hdr, sizeof(hdr), "%s Temp. [\xA7""C]", nm);
@@ -645,7 +672,10 @@ void draw_setup_display()
 
   if (editType==RUN_PCR) {
     const int xs[5] = {21,43,63,83,105};
-    for (int i=0;i<5;i++) draw_value_box(xs[i],55,ev[i*2],MenuItem==i*2,editing);
+    for (int i=0;i<5;i++) {
+      if ((i==2)&&tdOn()) draw_anneal_box(xs[i],55,MenuItem==4,editing);
+      else draw_value_box(xs[i],55,ev[i*2],MenuItem==i*2,editing);
+    }
 
     // cycles box
     display.drawRect(38,45,61,11,1);
@@ -756,6 +786,7 @@ void draw_run_display()
   display.setTextColor(0);
   if (counter%2==0) {
     if (runType==RUN_RT) snprintf(buf, sizeof(buf), "RT - Step %d of %d", PCRstate+1, numSteps(RUN_RT));
+    else if ((PCRstate>0)&&(PCRstate<4)&&(PCRcycle<=tdCycles())) snprintf(buf, sizeof(buf), "PCR - %d of %d TD", shownCycle, total);
     else snprintf(buf, sizeof(buf), "PCR - %d of %d", shownCycle, total);
     drawCentered(2, buf);
   } else {
@@ -1003,8 +1034,8 @@ unsigned long estimateSecondsLeft()
     int nx = nextStep(st, cyc);
     if (nx < 0) break;
     st = nx;
-    secs += rampSeconds(prevT, stepTemp(st), st) + stepTime(st);
-    prevT = assumedTemp(stepTemp(st));
+    secs += rampSeconds(prevT, stepTempAt(st,cyc), st) + stepTime(st);
+    prevT = assumedTemp(stepTempAt(st,cyc));
   }
   return (unsigned long)secs;
 }
@@ -1047,10 +1078,17 @@ void draw_done_display()
   printRampLine("Cool: ", runCoolN, runCoolSecs, runCoolDeg);
 
   display.drawLine(0,51,128,51,1);
-  display.setCursor(0,55);
-  display.print(coolActive ? "Cooling: " : "Block: ");
-  display.print(temperature_mean,1);
-  display.print("\xA7""C");
+  if (coolActive) {                       // auto cool-down running: live block temp
+    display.setCursor(0,55);
+    display.print("Cooling: ");
+    display.print(temperature_mean,1);
+    display.print("\xA7""C");
+  } else {                                // all finished: solid bar like the title
+    display.fillRect(0,53,128,11,1);
+    display.setTextColor(0);
+    drawCentered(55, "COMPLETE");
+    display.setTextColor(1);
+  }
 
   display.display();
 }
@@ -1060,9 +1098,25 @@ int* progVals(int type) { return (type==RUN_RT) ? rtprog.value : settings.value;
 int numSteps(int type) { return (type==RUN_RT) ? 3 : 5; }
 int lastValItem(int type) { return (type==RUN_RT) ? 5 : 10; }    // last editable item; then Set, Cancel
 bool isTempItem(int type, int item) { return (item%2==0) && !((type==RUN_PCR)&&(item==10)); }
-int stepTemp(int st) { return progVals(runType)[st*2]; }
+int stepTempAt(int st, int cyc) {          // anneal follows the touchdown schedule
+  if ((runType==RUN_PCR)&&(st==2)) return annealTemp(cyc);
+  return progVals(runType)[st*2];
+}
+int stepTemp(int st) { return stepTempAt(st, PCRcycle); }
+
+// ---- Touchdown ----
+bool tdOn() { return (settings.value[4]!=TEMP_ROOM) && (settings.tdStart > settings.value[4]); }
+int tdCycles() { return tdOn() ? (settings.tdStart - settings.value[4] + TD_STEP - 1) / TD_STEP : 0; }
+int annealTemp(int cyc) {
+  if (!tdOn()) return settings.value[4];
+  int t = settings.tdStart - (cyc-1)*TD_STEP;
+  return (t < settings.value[4]) ? settings.value[4] : t;
+}
+// Fewest total cycles for a full touchdown: the step-down cycles plus one at the end temp
+int minCycles() { return tdOn() ? tdCycles() + 1 : 1; }
+bool isAnnealItem() { return (editType==RUN_PCR) && (MenuItem==4); }
 int stepTime(int st) { return progVals(runType)[st*2+1]; }
-int totalCycles() { return (runType==RUN_RT) ? 1 : settings.value[10]; }
+int totalCycles() { return (runType==RUN_RT) ? 1 : settings.value[10]; }   // PCR: total, touchdown included
 int statsIndex(int st) { return (runType==RUN_RT) ? 5+st : st; }
 float assumedTemp(int raw) { return (raw==TEMP_ROOM) ? ROOM_TEMP_EST : raw; }
 
@@ -1078,7 +1132,7 @@ int nextStep(int st, int &cyc)
 {
   if (runType==RUN_RT) return (st < 2) ? st+1 : -1;
   if (st==4) return -1;
-  if (st==3) { cyc++; return (cyc > settings.value[10]) ? 4 : 1; }
+  if (st==3) { cyc++; return (cyc > totalCycles()) ? 4 : 1; }
   return st+1;
 }
 
@@ -1091,4 +1145,30 @@ void startRun(int type)
   runCompleted=false; estAtStart=0; stats.runsStarted++;
   runHeatN=0; runCoolN=0; runHeatSecs=0; runCoolSecs=0; runHeatDeg=0; runCoolDeg=0;
   for (int i=0;i<10;i++) TEMPdif_a[i]=0;
+}
+
+// Annealing bar with touchdown: outline up to the start temp, a line across at the end temp.
+// Label shows the start (or the end while editing it); it sits just under the line,
+// or above the bar if that would hit the cycles box.
+void draw_anneal_box(int x, int y, bool highlight, bool edit)
+{
+  int start = settings.tdStart;
+  int endRaw = settings.value[4];
+  int endH = (endRaw==TEMP_ROOM) ? TEMP_ROOM_COUNTER : endRaw;
+  int top = y+2-start/2;
+  int lineY = y+2-endH/2;
+
+  display.drawRect(x-3,top,17,start/2-1,1);
+  display.drawLine(x-3,lineY,x+13,lineY,1);
+
+  bool showEnd = edit && highlight && (annealPhase==1);
+  int ly = lineY+2;
+  if (ly+8 > 44) ly = top-10;               // keep clear of the cycles box (y 45-55)
+
+  if (highlight&&!edit) {display.fillRect(x-3,ly-1,17,10,1); display.setTextColor(0);}
+  if (highlight&&edit) display.drawRect(x-2,ly-1,15,10,1);
+  display.setCursor(x,ly);
+  if (showEnd) { if (endRaw==TEMP_ROOM) display.print("RT"); else display.print(endRaw); }
+  else display.print(start);
+  display.setTextColor(1);
 }

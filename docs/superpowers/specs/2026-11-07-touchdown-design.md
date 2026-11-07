@@ -24,6 +24,8 @@ Background on touchdown: the anneal temperature starts high, where only the exac
 
 Done in Spikehole 0.0.1b (branch `storey-1.0`): items 0 (except the firmware backup), plus the version rename and the heater-off button waits.
 
+**Spikehole 0.0.3b** implemented touchdown (roadmap item 1) as designed here, with two refinements. First, **the cycle count is the total, with touchdown included** (the owner found "touchdown added on top" confusing). When touchdown is off and you edit the anneal start, the end follows it, so a plain anneal edit is a single change; you only lower the end in the second press to create a touchdown. (Second refinement.)
+
 **Spikehole 0.0.2b** delivered roadmap items 2 and 4 in a different form from first planned:
 - Main menu: Run PCR / Run RT / Config.
 - Config: PCR / RT / Debug / Back.
@@ -31,7 +33,7 @@ Done in Spikehole 0.0.1b (branch `storey-1.0`): items 0 (except the firmware bac
 - A **Room temperature** setting ("RT": heater off, timer starts at once).
 - A Debug page for the ramp statistics.
 
-The remaining Settings items (touchdown step size, left-handed mode, cool-down on/off) can go under Config later. **Next: touchdown (item 1), then named programs (item 3).**
+The remaining Settings items (touchdown step size, left-handed mode, cool-down on/off) can go under Config later. **Next: named programs (item 3).**
 
 Later and optional: non-blocking button handling, and a time-based PID.
 

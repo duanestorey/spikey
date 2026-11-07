@@ -17,9 +17,10 @@ A fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/PocketPCR): a pocke
 | `PCB_Layouts/PocketPCR_PCB/RocketPCR/` | Main board KiCad (old KiCad 5 format) files and Gerbers. "RocketPCR" is just the old project name. |
 | `PCB_Layouts/PocketPCR_Lid/` | Lid PCB (KiCad and Gerbers). Mechanical/cosmetic only; there is no lid heater on this device. |
 | `PCB_Layouts/PocketPCR_BottomHeater/` | Heater PCB, DXF outlines, NTC lookup sheet (`PCR_Temp_NTCG103.ods`) |
-| `PocketPCR_BOM.ods`, `Parts/` | Bill of materials and a heater drawing |
+| `docs/ramp-measurements.md` | Log of measured heat/cool rates per run (empty vs loaded, fan tests). Add to it after each test run |
+| `PocketPCR_BOM.ods`, `Parts/` | Bill of materials; heater block drawing (GaudiLabs PDF) and a 3D model of the block (FreeCAD/STEP/3MF, by Andre Maia Chagas, GPL-3.0; credits and checksums in `Parts/info.md`) |
 
-Not in the repo: enclosure/3D files, build docs, the Adafruit display libraries, and any tests or CI.
+Not in the repo: enclosure files, build docs, the Adafruit display libraries, and any tests or CI.
 
 ## Hardware ↔ firmware pin map (checked against `RocketPCR.net`)
 
@@ -99,13 +100,22 @@ There are no tests. If you add logic, keep the pure parts (temperature conversio
 
 ## Changes in this fork
 
+### Spikehole 0.0.3b: Touchdown PCR
+
+- **Default PCR program** (written on the first boot after an upload): Init 95 °C 5 min; Denature 94 °C 30 s; Annealing touchdown 63 → 55 °C, 30 s; Extension 72 °C 30 s; Final extension 72 °C 5 min; 35 cycles in total (8 touchdown + 27 at 55 °C).
+- **Data:** `EEprom` gains `tdStart`, the anneal **start** temperature. `value[4]` is the anneal **end** temperature. Touchdown is on when `tdStart > value[4]` and the end isn't Room (`tdOn()`). Defaults: 63 → 55, so touchdown is **on** by default: of the default 35 cycles, 8 step down from 63 to 56 and 27 run at 55. The step is `TD_STEP` = 1 °C per cycle.
+- **Schedule:** **`value[10]` is the total cycle count, with the touchdown cycles included.** `tdCycles()` = start − end (rounded up for larger steps) is how many of those cycles step down. `annealTemp(cyc)` = max(end, start − (cyc−1)·TD_STEP). `stepTempAt(st,cyc)` routes PCR step 2 through it, so `PCR_set`, `nextStep()` and `estimateSecondsLeft()` all follow the schedule. The editor keeps the total **≥ `minCycles()`** = tdCycles + 1, so the touchdown always reaches the end temperature. The Cycles item can't go below it, and editing the anneal range raises the cycle count automatically when needed (it never lowers it). Example: 2 cycles with 63→62; moving the end to 61 raises it to 3.
+- **Run screen:** title "PCR - n of N TD" during the touchdown cycles; the Temp line shows the current anneal target.
+- **Editing (Config → PCR, Annealing):** press once to edit the **start** ("Anneal start [°C]", 25–99). If touchdown was off, the end follows the start (`tdLinked`), so a plain anneal change works as before. Press again to edit the **end** ("Anneal end [°C]", Room–start). A third press finishes. Lowering the start below the end pulls the end down with it.
+- **Bar:** with touchdown on, `draw_anneal_box()` draws the outline to the start temperature with a line across at the end. The label shows the start (or the end while editing it) and sits just under the line, or above the bar if it would hit the cycles box. Browsing header: "Annealing 63>55 [°C]". The "Nx" box shows the total cycle count.
+
 ### Spikehole 0.0.2b: PCR + RT programs, Config menu, Room temperature
 
 - **Main menu:** Run PCR / Run RT / Config >, in the small font under a plain "Main Menu" title with a separator line (`draw_title()`, also used by Config and Debug). It shares `draw_menu()` with Config.
 - **Config** (`CASE_Config`, `draw_config_display()`): PCR program / RT program / Debug / < Back. PCR and RT open the editor (`CASE_Settings`/`CASE_EditSettings`, generalised with `editType`). Set saves and Cancel discards; both return to Config.
 - **Program types:** `runType` is `RUN_PCR` or `RUN_RT`. The run code goes through the helpers at the end of the sketch (`stepTemp`, `stepTime`, `totalCycles`, `nextStep`, `stepName`, `statsIndex`, `startRun`), so the state machine, the estimate and the statistics work for both.
   - **PCR:** uses `settings.value[0..10]`, unchanged GaudiLabs layout. Editor items: 0–9 temp/time, 10 cycles, 11 Set, 12 Cancel.
-  - **RT:** a separate `FlashStorage` named `rt_store` (`RTprog`, `RT_MAGIC` "RTP1") with 3 temp/time pairs: **Incubation, Transcribe, Deactivate**. One pass, then the usual auto cool-down. Defaults: Room 10 min / 55 °C 15 min / 85 °C 5 min. Editor items: 0–5, 6 Set, 7 Cancel. Three bars at x = 30/62/94, with no cycle box.
+  - **RT:** a separate `FlashStorage` named `rt_store` (`RTprog`, `RT_MAGIC` "RTP1") with 3 temp/time pairs: **Incubation, Transcribe, Deactivate**. One pass, then the usual auto cool-down. Defaults: Room 10 min / 55 °C 20 min / 85 °C 5 min. Editor items: 0–5, 6 Set, 7 Cancel. Three bars at x = 30/62/94, with no cycle box.
 - **Room temperature** (`TEMP_ROOM` = 0, shown "RT"): turn a temperature below 25 °C to select it (editor value 24). The heater stays off and the timer starts at once, with no ±0.5 °C wait. The fan runs while the block is above `ROOM_FAN_ABOVE` (30 °C). The estimate assumes the next step starts from `ROOM_TEMP_EST` (25 °C). Room steps aren't counted in the ramp statistics. Works in both programs.
 - **Run screen:** title "PCR - n of N" or "RT - Step n of 3"; "Temp: Room / xx.x°C" during Room steps. **Done:** "PCR/RT Done" or "PCR/RT Stopped".
 - **Debug** (`CASE_Debug`, `draw_debug_display()`): three pages, knob = page, button = back. Page 1: runs started/done, last run's estimated vs actual time, overall heat/cool rates. Page 2: PCR per-step ramp count and mean °C/s. Page 3: the same for RT.
@@ -125,7 +135,7 @@ Branch `storey-1.0`. Firmware name: **Spikehole** (renamed from "Storey" at 0.0.
   - Title bar "PCR Done", or "PCR Stopped" if the run was stopped.
   - "Total Time:" for this run, and "Estimated:" (the estimate made at the start).
   - "Heat:" and "Cool:" for this run: time-weighted °C/s, and the average seconds per ramp (`~12s`), from `runHeat*`/`runCool*`.
-  - A separator, then "Cooling: xx.x°C" (auto cool-down running) or "Block: xx.x°C".
+  - A separator, then "Cooling: xx.x°C" while the auto cool-down runs. When it ends, the line under the separator becomes a solid inverted bar reading **COMPLETE**, so it's clear the run is fully finished.
 - **Ramp statistics in flash** (`RampStats`, a second `FlashStorage` named `stats_store`, separate from the settings so Set/Cancel don't touch it):
   - **Contents:** overall heat/cool rates; per target step (0 Init … 4 Final) the number of ramps measured, mean/min/max °C/s, and the last ramp's ΔT and seconds; runs started/completed; and for the last completed run, the estimate made at the start (`lastEstSecs`) and the actual duration (`lastActualSecs`).
   - **Measuring:** each ramp of at least `RAMP_MIN_DELTA` (3 °C) is measured when it reaches its target (`learnRampRate()`).

@@ -1,0 +1,8 @@
+Ramp stats saved by Spikehole 0.0.3b (RAM2 layout) at flash 0x10400, read 2026-11-07.
+Empty block (no tubes), 4-cycle touchdown run (Done screen showed heat 1.04 / cool 1.15 C/s).
+runs started/completed 1/1   blended heat/cool 1.064/1.141 C/s   ramps heat/cool 8/4
+last completed run estimated/actual: 721s / 707s
+  PCR Init       n=1 mean=1.010 min=1.010 max=1.010 C/s  last +71.1C in 70.4s
+  PCR Denature   n=3 mean=1.034 min=1.030 max=1.036 C/s  last +21.9C in 21.3s
+  PCR Annealing  n=4 mean=1.150 min=1.124 max=1.169 C/s  last -33.9C in 29.8s
+  PCR Extension  n=4 mean=1.087 min=1.079 max=1.099 C/s  last +12.0C in 11.1s
