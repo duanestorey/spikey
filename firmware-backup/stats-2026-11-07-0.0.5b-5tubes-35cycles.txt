@@ -1,0 +1,9 @@
+# Ramp stats read from flash, 2026-11-07, Spikehole 0.0.5b, after a 35-cycle default PCR run with 5 tubes (stock fan)
+RampStats at flash 0x10400
+runs started/completed: 1/1
+blended heat/cool: 1.115/0.942 C/s   ramps heat/cool: 70/35
+last completed run estimated/actual: 6219s / 6270s
+  PCR Init       n=1    mean=1.068 min=1.068 max=1.068 C/s  last +73.4C in 68.8s
+  PCR Denature   n=34   mean=0.984 min=0.973 max=0.994 C/s  last +22.1C in 22.6s
+  PCR Annealing  n=35   mean=0.956 min=0.933 max=1.046 C/s  last -39.0C in 41.3s
+  PCR Extension  n=35   mean=1.198 min=1.178 max=1.237 C/s  last +17.1C in 14.5s
