@@ -96,7 +96,7 @@ It's finished but **switched off in 1.0 builds** and will ship in **1.1.0**. To 
 
 - **Cable:** a PocketPCR and a **USB-C data cable** (some cables are charge-only).
 - **Computer:** macOS, Linux or Windows.
-- **[arduino-cli](https://arduino.github.io/arduino-cli/) or the Arduino IDE**, with:
+- **[arduino-cli](https://arduino.github.io/arduino-cli/) or the Arduino IDE** (to build from source; the prebuilt file only needs `bossac`), with:
   - the **Arduino SAMD** and **Adafruit SAMD** board packages. Adafruit's needs this board manager URL: `https://adafruit.github.io/arduino-board-index/package_adafruit_index.json`
   - the **Adafruit GFX Library** and **Adafruit SSD1306** libraries
 - **`bossac`**, which comes with the Arduino SAMD package. It's used for the backup and restore. It isn't on your `PATH`, so use its full path (or add its folder to `PATH`):
@@ -145,7 +145,22 @@ The file should be **253,952 bytes**. Keep it somewhere safe. The bootloader isn
 
 Optional: `python3 tools/decode_stats.py pocketpcr_backup.bin` shows the ramp statistics saved by Spikey.
 
-### 2. Build and flash Spikey
+### 2. Flash Spikey
+
+**Option A: the prebuilt file** (no Arduino setup needed, just `bossac`). Download `spikey-1.0.0.bin` from the [1.0.0 release](https://github.com/duanestorey/spikey/releases/tag/spikey-1.0.0), and check it before flashing:
+
+```sh
+shasum -a 256 spikey-1.0.0.bin      # Linux: sha256sum   Windows: certutil -hashfile spikey-1.0.0.bin SHA256
+```
+It must print **`289b3a144270bca58213d663c2ddf88a5af6139c7473098d59535f549926e744`**. If it doesn't, don't flash it.
+
+With the device in its bootloader (step 1), flash and verify it:
+```sh
+bossac -U true --port=cu.usbmodem101 -e -w -v -R spikey-1.0.0.bin
+```
+This is for the `bossac` 1.7 that ships with the Arduino SAMD package, which writes above the bootloader automatically. Newer `bossac` versions (1.8 and up) need `--offset=0x2000` added. **Never** write at offset 0: that would overwrite the bootloader. Unplug and replug the device afterwards.
+
+**Option B: build it yourself** from the source (the same code as the `spikey-1.0.0` tag), if you'd rather not run a prebuilt file:
 
 ```sh
 arduino-cli compile --fqbn adafruit:samd:adafruit_feather_m0 --upload -p /dev/cu.usbmodem101 \
