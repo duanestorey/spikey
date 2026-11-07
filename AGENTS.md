@@ -102,7 +102,7 @@ A single `loop()`, no RTOS. Each pass reads the temperature, runs the safety che
 - **Room temperature:** `TEMP_ROOM` = 0, shown as "RT". It's selected by turning a temperature below 25 (editor value 24). The heater stays off, the timer starts at once, and the fan runs while the block is above 30 °C. Works in either program.
 - **Auto cool-down** (`CASE_Done`): fan at full until the block stops dropping (< 0.3 °C per 30 s) or 60 s pass (`COOL_TIMEOUT_MS`). Then the bottom line shows a **COMPLETE** bar.
 - **Time estimate:** `estimateSecondsLeft()` walks the rest of the program (touchdown temperatures included). It adds ramp time (|ΔT| ÷ rate) plus hold time.
-  - Rates come from each step's measured mean if there is one, otherwise the overall rate. Defaults: `HEAT_RATE_DEFAULT` 1.04 / `COOL_RATE_DEFAULT` 1.01 °C/s.
+  - Rates come from each step's measured mean if there is one, otherwise the overall rate. Defaults: `HEAT_RATE_DEFAULT` 1.06 / `COOL_RATE_DEFAULT` 0.95 °C/s (measured: 35-cycle run, 5 tubes, stock fan).
   - On an empty block, estimate vs actual was 721 s vs 707 s.
 - **Ramp statistics:** `RampStats` in `stats_store` (`STATS_MAGIC` "RAM2"). `step[8]` holds slots 0–4 for PCR **and sqPCR** (same physical ramps) and 5–7 for RT.
   - Each ramp of 3 °C or more updates its step's n, mean, min, max and last values.

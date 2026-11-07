@@ -73,8 +73,8 @@ const char* errorReason = "";
 unsigned long runStart = 0;       // millis() when the current run started (Elapsed Time)
 
 // Time-left estimate: ramp rates (°C/s). Start from these guesses, then learn from each real ramp.
-#define HEAT_RATE_DEFAULT 1.04   // measured on this device, 2026-11-07 (1-cycle run; refine with more data)
-#define COOL_RATE_DEFAULT 1.01   // measured on this device, 2026-11-07 (1-cycle run; refine with more data)
+#define HEAT_RATE_DEFAULT 1.06   // measured on this device, 2026-11-07: 35-cycle run, 5 tubes (hardware-specific)
+#define COOL_RATE_DEFAULT 0.95   // measured on this device, 2026-11-07: 35-cycle run, 5 tubes, stock fan
 #define RAMP_MIN_DELTA 3.0    // only ramps bigger than this (°C) are measured
 float rampStartT = 0;
 unsigned long rampStartMs = 0;
