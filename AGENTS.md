@@ -1,14 +1,14 @@
-# AGENTS.md — Spikehole (PocketPCR firmware fork)
+# AGENTS.md — Spikey (PocketPCR firmware fork)
 
 Working notes for AI coding agents and humans. This file describes the project **as it is now**: hardware, firmware structure, how to build, back up and flash, and the conventions to follow. For the user-facing description and changelog, see `README.md`.
 
 ## What this is
 
-**Spikehole** is a firmware fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/PocketPCR), a pocket-size, USB-powered PCR thermocycler for 5 tubes. The device has an aluminium block on a heater PCB, a fan, a 128×64 OLED and a rotary encoder with a push button.
+**Spikey** is a firmware fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/PocketPCR), a pocket-size, USB-powered PCR thermocycler for 5 tubes. The device has an aluminium block on a heater PCB, a fan, a 128×64 OLED and a rotary encoder with a push button.
 
 - **Repo:** [duanestorey/Spikehole](https://github.com/duanestorey/Spikehole) (`origin`). `upstream` is GaudiLabs.
 - **Branch:** work happens on **`1.0.0`**. `master` is still GaudiLabs' original (`daf77fc`, tag `gaudilabs-v1.02`).
-- **Versions:** betas are `Spikehole 0.0.Nb` (`VersionString`), with N going up on each flashed release, until launch as `1.0.0`. Tags are `spikehole-0.0.Nb`; the first one, from before the rename, is `storey-0.0.1b`. Add each release to the README changelog.
+- **Versions:** betas are `Spikey 0.0.Nb` (`VersionString`), with N going up on each flashed release, until launch as `1.0.0`. Tags are `spikey-0.0.Nb` from 0.0.6b on. Earlier tags keep their old names: `storey-0.0.1b`, then `spikehole-0.0.2b` and `spikehole-0.0.5b`. The firmware was called Storey, then Spikehole, and is Spikey from 0.0.6b. The GitHub repo is still named Spikehole. Add each release to the README changelog.
 - **License:** GPL-3.0 (`LICENSE`).
 - **Device facts:**
   - The user's unit shipped with GaudiLabs **V1.03 2022**, which was never published (the repo only has V1.02).

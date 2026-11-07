@@ -33,7 +33,7 @@ Done in Spikehole 0.0.1b (branch `storey-1.0`): items 0 (except the firmware bac
 - A **Room temperature** setting ("RT": heater off, timer starts at once).
 - A Debug page for the ramp statistics.
 
-The remaining Settings items (touchdown step size, left-handed mode, cool-down on/off) can go under Config later. **Spikehole 0.0.6b** added a **sqPCR** program type: the PCR steps plus manual reading pauses, held at the Extension temperature, with Resume [N] adjustable mid-run. **Next:** a device Settings page (temperature offset), power-failure resume, then named programs (item 3).
+The remaining Settings items (touchdown step size, left-handed mode, cool-down on/off) can go under Config later. **Spikey 0.0.6b** (renamed from Spikehole) added a **sqPCR** program type: the PCR steps plus manual reading pauses, held at the Extension temperature, with Resume [N] adjustable mid-run. **Next:** a device Settings page (temperature offset), power-failure resume, then named programs (item 3).
 
 Later and optional: non-blocking button handling, and a time-based PID.
 

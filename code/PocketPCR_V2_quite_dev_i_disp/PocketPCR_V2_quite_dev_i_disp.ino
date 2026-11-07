@@ -16,7 +16,7 @@ https://github.com/GaudiLabs/PocketPCR
 
 #include <Fonts/FreeSans9pt7b.h>
 
-const char VersionString[] = "Spikehole 0.0.6b";   // fork of GaudiLabs PocketPCR V1.02 2020
+const char VersionString[] = "Spikey 0.0.6b";   // fork of GaudiLabs PocketPCR V1.02 2020
 #define SPLASH_MS 5000                         // how long the start-up splash is shown
 
 // These constants won't change. They're used to give names to the pins used:

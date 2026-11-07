@@ -1,6 +1,6 @@
-# Spikehole
+# Spikey
 
-**Spikehole** is an alternative firmware for the **[PocketPCR](http://gaudi.ch/PocketPCR/)**, the pocket-size, USB-powered PCR thermocycler designed by [GaudiLabs](http://www.gaudi.ch/GaudiLabs/). It runs on the stock PocketPCR hardware and adds:
+**Spikey** is an alternative firmware for the **[PocketPCR](http://gaudi.ch/PocketPCR/)**, the pocket-size, USB-powered PCR thermocycler designed by [GaudiLabs](http://www.gaudi.ch/GaudiLabs/). It runs on the stock PocketPCR hardware and adds:
 
 - touchdown PCR
 - **sqPCR** (semi-quantitative PCR): a PCR program with **reading pauses**, for manual fluorescence readings
@@ -12,7 +12,7 @@
 
 This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/PocketPCR). All the hardware design files (PCBs, BOM, block drawing) are GaudiLabs' work and are included unchanged. Please support the original project and open science hardware at [gaudishop.ch](https://gaudishop.ch/).
 
-> **Status:** beta (`Spikehole 0.0.Nb`), working towards **1.0.0**. Development happens on the `1.0.0` branch. `master` is GaudiLabs' original firmware (V1.02).
+> **Status:** beta (`Spikey 0.0.Nb`), working towards **1.0.0**. Development happens on the `1.0.0` branch. `master` is GaudiLabs' original firmware (V1.02).
 
 ## Features
 
@@ -121,16 +121,16 @@ bossac -U true --port=cu.usbmodem101 -r verify.bin && cmp pocketpcr_backup.bin v
 
 The file should be **253,952 bytes**. Keep it somewhere safe. The bootloader isn't included, but uploads never touch it. Afterwards, **unplug and replug** the device to leave the bootloader; a software reset sends it straight back in.
 
-Optional: `python3 tools/decode_stats.py pocketpcr_backup.bin` shows the ramp statistics saved by Spikehole.
+Optional: `python3 tools/decode_stats.py pocketpcr_backup.bin` shows the ramp statistics saved by Spikey.
 
-### 2. Build and flash Spikehole
+### 2. Build and flash Spikey
 
 ```sh
 arduino-cli compile --fqbn adafruit:samd:adafruit_feather_m0 --upload -p /dev/cu.usbmodem101 \
   code/PocketPCR_V2_quite_dev_i_disp
 ```
 
-The upload resets the device into the bootloader automatically. Wait for **"Verify successful"**. The device then restarts and shows the splash with the Spikehole version.
+The upload resets the device into the bootloader automatically. Wait for **"Verify successful"**. The device then restarts and shows the splash with the Spikey version.
 
 In the Arduino IDE: select the board **Adafruit Feather M0** and the right port, open `code/PocketPCR_V2_quite_dev_i_disp/PocketPCR_V2_quite_dev_i_disp.ino`, and click Upload.
 
@@ -164,7 +164,7 @@ Unplug and replug the device afterwards.
 
 ### 1.0.0 (unreleased)
 
-First stable Spikehole release. Compared with GaudiLabs' PocketPCR firmware V1.02:
+First stable Spikey release. Compared with GaudiLabs' PocketPCR firmware V1.02:
 
 **New**
 - **PCR, sqPCR and RT programs**, each with its own saved settings. RT is Incubation → Transcribe → Deactivate, one pass.
@@ -197,7 +197,7 @@ First stable Spikehole release. Compared with GaudiLabs' PocketPCR firmware V1.0
 
 | Version | Highlights |
 |---|---|
-| 0.0.6b | sqPCR program with manual reading pauses (Resume [N], Run to completion, Next Pause countdown; P1/6/3 schedule); 5-item Config menu |
+| 0.0.6b | sqPCR program with manual reading pauses (Resume [N], Run to completion, Next Pause countdown; P1/6/3 schedule); 5-item Config menu; renamed to Spikey |
 | 0.0.5b | Default programs updated (PCR 95/94/63→55/72/72, 35 cycles; RT Room/55 °C 20 min/85 °C) |
 | 0.0.4b | COMPLETE banner after the cool-down |
 | 0.0.3b | Touchdown PCR; cycle count is the total and covers a full touchdown |
@@ -208,8 +208,8 @@ First stable Spikehole release. Compared with GaudiLabs' PocketPCR firmware V1.0
 
 - **PocketPCR hardware and original firmware:** [GaudiLabs](http://www.gaudi.ch/GaudiLabs/) (Urs Gaudenz). Project page: <http://gaudi.ch/PocketPCR/>
 - **3D model of the heater block:** Andre Maia Chagas ([@amchagas](https://github.com/amchagas)). See `Parts/info.md`.
-- **Spikehole firmware changes:** Duane Storey.
+- **Spikey firmware changes:** Duane Storey.
 
 ## License
 
-PocketPCR, all design files and software are licensed under the **GNU General Public License v3.0**. Spikehole is distributed under the same license. See `LICENSE`.
+PocketPCR, all design files and software are licensed under the **GNU General Public License v3.0**. Spikey is distributed under the same license. See `LICENSE`.
