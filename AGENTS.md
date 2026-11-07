@@ -79,7 +79,7 @@ A single `loop()`, no RTOS. Each pass reads the temperature, runs the safety che
   - "OVER TEMP": above `T_MAX` (105 °C)
   - "NO HEATING": full power for 60 s while more than 5 °C below target, with less than 2 °C rise
   - All blocking button waits go through `waitRelease()`, which turns the heater off first.
-- **Screens** (`caseUX`): `CASE_Main` (Run PCR / Run sqPCR / Run RT / Config >) → `CASE_Config` (PCR / sqPCR / RT Program / Debug / < Back; menus with more than 4 items use a 10 px pitch) → `CASE_Settings` / `CASE_EditSettings` (editor, `editType`) or `CASE_Debug` (3 pages); `CASE_Run` ⇄ `CASE_Paused` (sqPCR) → `CASE_Done`; `CASE_Error`. Menu item ↔ type mapping: `menuType()` / `typeMenuIndex()`. Menus use `draw_menu()` / `draw_title()`, a small font with a plain title and a separator.
+- **Screens** (`caseUX`): `CASE_Main` (Run PCR / Run sqPCR / Run RT / Config >) → `CASE_Config` (PCR / sqPCR / RT Program / Debug / About / < Back; menus with more than 4 items use a 10 px pitch, and `draw_menu()` scrolls a 5-row window for more than 5) → `CASE_Settings` / `CASE_EditSettings` (editor, `editType`) or `CASE_Debug` (3 pages) or `CASE_About` (`draw_splash()`, the same splash as at start-up); `CASE_Run` ⇄ `CASE_Paused` (sqPCR) → `CASE_Done`; `CASE_Error`. Menu item ↔ type mapping: `menuType()` / `typeMenuIndex()`. Menus use `draw_menu()` / `draw_title()`, a small font with a plain title and a separator.
 - **Program types** ("sqPCR" = semi-quantitative PCR, the owner's name for the paused qPCR-style program; keep it) (`runType`: `RUN_PCR` 0 / `RUN_RT` 1 / `RUN_SQPCR` 2). `pcrLike()` covers PCR and sqPCR; `prog(type)` returns `settings` or `sqsettings`. The run code only uses the helpers at the end of the sketch: `stepTemp`/`stepTempAt`, `stepTime`, `totalCycles`, `nextStep`, `stepName`, `statsIndex`, `startRun`.
   - **PCR:** `settings` (`EEprom` in `my_flash_store`). `value[0..9]` are temp/time pairs for Init, Denature, Annealing, Extension and Final; `value[10]` is the **total** cycle count; `value[11]` is the "already set up" flag; `tdStart` is the touchdown start. The cycle loops over steps 1–3.
   - **sqPCR:** `sqsettings` (`EEprom` in `sqpcr_store`): the PCR layout plus `pauseFirst`, `pauseSecond` and `pauseEvery`, all **1–9** (`PAUSE_MAX_N`). Editor items: 10 cycles, 11 first pause (baseline), 12 second pause (> first), 13 every, 14 Set, 15 Cancel. `clampPauses()` keeps first ≤ cycles and first < second ≤ 9/cycles. The cycles box draws `40x P1/6/3` with each segment highlighted separately. Defaults: the PCR steps, 40 cycles, `P1/6/3` (pauses after cycles 1, 6, 9, 12 …).
@@ -121,7 +121,7 @@ A single `loop()`, no RTOS. Each pass reads the temperature, runs the safety che
 - **Software SPI to the OLED is slow.** PA22/PA23 can use SERCOM3 hardware SPI.
 - **Settings are lost on every upload.** A save/restore around uploads would fix this.
 - **Roadmap:**
-  - **next:** a device Settings page under Config (temperature calibration offset first; Config then needs a scrolling list)
+  - **next:** a device Settings page under Config (temperature calibration offset first; Config already scrolls)
   - power-failure resume
   - named saved programs (5-character names entered with the knob)
   - an adjustable touchdown step under Config

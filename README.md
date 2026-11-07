@@ -33,7 +33,7 @@ This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/
 | Screen | Items |
 |---|---|
 | **Main Menu** | Run PCR · Run sqPCR · Run RT · Config > |
-| **Config** | PCR Program · sqPCR Program · RT Program · Debug · < Back |
+| **Config** | PCR Program · sqPCR Program · RT Program · Debug · About · < Back (scrolls; About shows the start-up splash with the version) |
 
 - **Turn** the knob to move and **press** to select.
 - **In a program editor:**
@@ -176,7 +176,7 @@ First stable Spikey release. Compared with GaudiLabs' PocketPCR firmware V1.02:
   - paused time left out of the run statistics
 - **Touchdown PCR** on the Annealing step: a start/end range on the bar, 1 °C per cycle. The cycle count is the total, kept at least as long as a full touchdown needs.
 - **Room temperature ("RT") steps:** heater off, and the timer starts immediately.
-- **Menus:** Main Menu (Run PCR / Run sqPCR / Run RT / Config >) and Config (PCR Program / sqPCR Program / RT Program / Debug / < Back), in a clean small-font style.
+- **Menus:** Main Menu (Run PCR / Run sqPCR / Run RT / Config >) and Config (PCR Program / sqPCR Program / RT Program / Debug / About / < Back; scrolls), in a clean small-font style.
 - **Run screen:** cycle count with a touchdown marker, step, target and block temperature, step time, elapsed time and **estimated time remaining**.
 - **Time estimate** that learns this block's real heating and cooling rates for each step. Measured within about 2% on an empty block.
 - **Done screen** with total vs estimated time and this run's heating and cooling rates, plus an **automatic cool-down** and a **COMPLETE** banner.
@@ -197,6 +197,7 @@ First stable Spikey release. Compared with GaudiLabs' PocketPCR firmware V1.02:
 
 | Version | Highlights |
 |---|---|
+| 0.0.7b | Config > About (shows the splash and version again); menus longer than 5 items scroll |
 | 0.0.6b | sqPCR program with manual reading pauses (Resume [N], Run to completion, Next Pause countdown; P1/6/3 schedule); 5-item Config menu; renamed to Spikey |
 | 0.0.5b | Default programs updated (PCR 95/94/63→55/72/72, 35 cycles; RT Room/55 °C 20 min/85 °C) |
 | 0.0.4b | COMPLETE banner after the cool-down |

@@ -16,7 +16,7 @@ https://github.com/GaudiLabs/PocketPCR
 
 #include <Fonts/FreeSans9pt7b.h>
 
-const char VersionString[] = "Spikey 0.0.6b";   // fork of GaudiLabs PocketPCR V1.02 2020
+const char VersionString[] = "Spikey 0.0.7b";   // fork of GaudiLabs PocketPCR V1.02 2020
 #define SPLASH_MS 5000                         // how long the start-up splash is shown
 
 // These constants won't change. They're used to give names to the pins used:
@@ -61,6 +61,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT,
 #define CASE_Config 7
 #define CASE_Debug 8
 #define CASE_Paused 9
+#define CASE_About 10
 
 // Safety cutoff
 #define ADC_MIN 20            // raw ADC at/below this: thermistor shorted
@@ -250,16 +251,8 @@ void setup() {
     
   display.setTextSize(1);
   display.setTextColor(WHITE); 
-  // Splash: 5 lines (line 3 blank), small built-in font, centred on screen
-  {
-    const char* splash[] = { "PocketPCR", "by GaudiLabs", "", "Version", VersionString };
-    const int n = 5, lineH = 10;
-    int y = (SCREEN_HEIGHT - (n*lineH - 2)) / 2;   // -2: last line needs only its 8 px glyph height
-    display.setFont();
-    for (int i=0; i<n; i++) { drawCentered(y + i*lineH, splash[i]); }
-  }
+  draw_splash();             // also shown by Config > About
   display.dim(false);
-  display.display();
   delay(SPLASH_MS);   // hold the button during the splash for left-handed mode
 
 
@@ -367,16 +360,22 @@ case CASE_Main:
 
 case CASE_Config:
   {
-    if (counter>4) counter=0;
-    if (counter<0) counter=4;
+    if (counter>5) counter=0;
+    if (counter<0) counter=5;
     int item = counter;
     draw_config_display(item);
     if (!digitalRead(butPin)) {waitRelease();
       if (item<3) {editType = menuType(item); caseUX=CASE_Settings; counter=0;}   // PCR / sqPCR / RT program
       else if (item==3) {caseUX=CASE_Debug; counter=0;}
+      else if (item==4) {caseUX=CASE_About;}
       else {caseUX=CASE_Main; counter=3;}
     }
   }
+    break;
+
+case CASE_About:                 // the start-up splash again; press to go back
+    draw_splash();
+    if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Config; counter=4;}
     break;
 
 case CASE_Debug:
@@ -811,13 +810,29 @@ void draw_menu(const char* title, const char* const* items, int n, int sel)
   display.setFont();
   draw_title(title);
   int y0 = (n>4) ? 14 : 16, pitch = (n>4) ? 10 : 12;   // 5 rows need a tighter pitch
-  for (int i=0;i<n;i++) {
-    int y = y0 + i*pitch;
+  const int rows = 5;                                  // at most 5 rows fit; longer lists scroll
+  int first = (n>rows && sel>=rows) ? sel-rows+1 : 0;
+  for (int i=first;i<n && i<first+rows;i++) {
+    int y = y0 + (i-first)*pitch;
     if (sel==i) {display.fillRect(0,y-(n>4 ? 1 : 2),128,(n>4 ? 10 : 11),1); display.setTextColor(0);}
     else display.setTextColor(1);
     drawCentered(y, items[i]);
   }
   display.setTextColor(1);
+  display.display();
+}
+
+// Start-up splash: 5 lines (line 3 blank), small built-in font, centred on screen
+void draw_splash()
+{
+  static const char* const splash[] = { "PocketPCR", "by GaudiLabs", "", "Version", VersionString };
+  const int n = 5, lineH = 10;
+  int y = (SCREEN_HEIGHT - (n*lineH - 2)) / 2;   // -2: last line needs only its 8 px glyph height
+  display.clearDisplay();
+  display.setFont();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  for (int i=0; i<n; i++) { drawCentered(y + i*lineH, splash[i]); }
   display.display();
 }
 
@@ -829,8 +844,8 @@ void draw_main_display()
 
 void draw_config_display(int item)
 {
-  static const char* const items[5] = {"PCR Program", "sqPCR Program", "RT Program", "Debug", "< Back"};
-  draw_menu("Config", items, 5, item);
+  static const char* const items[6] = {"PCR Program", "sqPCR Program", "RT Program", "Debug", "About", "< Back"};
+  draw_menu("Config", items, 6, item);
 }
 
 // Debug pages: saved ramp statistics (knob = page, button = back)
