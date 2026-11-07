@@ -1,0 +1,3 @@
+# Original GaudiLabs V1.03 firmware dump: unreleased, no source published,
+# so it is kept local only (see firmware-backup/README.md for checksum/restore).
+firmware-backup/*.bin
