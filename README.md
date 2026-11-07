@@ -13,7 +13,7 @@
 
 This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/PocketPCR). All the hardware design files (PCBs, BOM, block drawing) are GaudiLabs' work and are included unchanged. Please support the original project and open science hardware at [gaudishop.ch](https://gaudishop.ch/).
 
-> **Status:** **1.0.0**, the first stable release. **sqPCR** is planned for 1.1.0. `master` is GaudiLabs' original firmware (V1.02).
+> **Status:** **1.0.0**, the first stable release. **sqPCR** is planned for 1.1.0. `master` holds the latest Spikey release. GaudiLabs' original firmware (V1.02) is kept as the tag `gaudilabs-v1.02`.
 
 > **Use at your own risk.** Spikey is an unofficial, hobbyist firmware, provided **without any warranty**. It isn't a medical or diagnostic device. See [Safety and disclaimer](#safety-and-disclaimer).
 

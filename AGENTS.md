@@ -7,7 +7,7 @@ Working notes for AI coding agents and humans. This file describes the project *
 **Spikey** is a firmware fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/PocketPCR), a pocket-size, USB-powered PCR thermocycler for 5 tubes. The device has an aluminium block on a heater PCB, a fan, a 128×64 OLED and a rotary encoder with a push button.
 
 - **Repo:** [duanestorey/spikey](https://github.com/duanestorey/spikey) (`origin`). `upstream` is GaudiLabs.
-- **Branch:** work happens on **`1.0.0`**. `master` is still GaudiLabs' original (`daf77fc`, tag `gaudilabs-v1.02`).
+- **Branches:** `master` is the latest release (fast-forwarded to `1.0.0` at the 1.0.0 release). Development happens on a branch, which is merged into `master` at each release. GaudiLabs' original is the tag `gaudilabs-v1.02` (`daf77fc`).
 - **Versions:** `VersionString` is **`Spikey 1.0.0`** (first stable release, sqPCR off). The betas were `Spikey 0.0.Nb`. Next: bug fixes as `1.0.x`, sqPCR as `1.1.0`. Tags are `spikey-0.0.Nb` from 0.0.6b on. Earlier tags keep their old names: `storey-0.0.1b`, then `spikehole-0.0.2b` and `spikehole-0.0.5b`. The firmware was called Storey, then Spikehole, and is Spikey from 0.0.6b. The GitHub repo was renamed to `spikey` too (GitHub redirects the old Spikehole URL). Add each release to the README changelog.
 - **License:** GPL-3.0 (`LICENSE`).
 - **Device facts:**
