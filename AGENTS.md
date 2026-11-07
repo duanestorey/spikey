@@ -8,7 +8,7 @@ Working notes for AI coding agents and humans. This file describes the project *
 
 - **Repo:** [duanestorey/spikey](https://github.com/duanestorey/spikey) (`origin`). `upstream` is GaudiLabs.
 - **Branch:** work happens on **`1.0.0`**. `master` is still GaudiLabs' original (`daf77fc`, tag `gaudilabs-v1.02`).
-- **Versions:** betas are `Spikey 0.0.Nb` (`VersionString`), with N going up on each flashed release, until launch as `1.0.0`. Tags are `spikey-0.0.Nb` from 0.0.6b on. Earlier tags keep their old names: `storey-0.0.1b`, then `spikehole-0.0.2b` and `spikehole-0.0.5b`. The firmware was called Storey, then Spikehole, and is Spikey from 0.0.6b. The GitHub repo was renamed to `spikey` too (GitHub redirects the old Spikehole URL). Add each release to the README changelog.
+- **Versions:** `VersionString` is **`Spikey 1.0.0`** (first stable release, sqPCR off). The betas were `Spikey 0.0.Nb`. Next: bug fixes as `1.0.x`, sqPCR as `1.1.0`. Tags are `spikey-0.0.Nb` from 0.0.6b on. Earlier tags keep their old names: `storey-0.0.1b`, then `spikehole-0.0.2b` and `spikehole-0.0.5b`. The firmware was called Storey, then Spikehole, and is Spikey from 0.0.6b. The GitHub repo was renamed to `spikey` too (GitHub redirects the old Spikehole URL). Add each release to the README changelog.
 - **License:** GPL-3.0 (`LICENSE`).
 - **Device facts:**
   - The user's unit shipped with GaudiLabs **V1.03 2022**, which was never published (the repo only has V1.02).
@@ -115,6 +115,8 @@ A single `loop()`, no RTOS. Each pass reads the temperature, runs the safety che
   - **RT:** Room 10 min / 55 °C 20 min / 85 °C 5 min.
 
 ## Open issues and ideas
+
+- **A step can wait forever for an unreachable target** (inherited from GaudiLabs' loop, deliberately left as-is for 1.0). `PCR_transition` only starts the hold within ±0.5 °C (`temperature_tollerance`). A 25 °C step in a room above about 25 °C, or a heater that stalls less than 5 °C short (below the NO HEATING threshold), never starts its timer. The README tells users to use RT instead of 25 °C. A possible fix is a stall timeout that starts the hold anyway; the owner chose not to add new behaviour to the main loop for 1.0. Lower temperature bound is 25 °C, as in the original.
 
 - **Blocking button waits.** The heater is safe (it's turned off), but the loop still blocks while the button is held. Should become non-blocking.
 - **The PID's I term depends on loop speed.** Move it to a fixed `millis()` time step.

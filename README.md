@@ -13,7 +13,7 @@
 
 This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/PocketPCR). All the hardware design files (PCBs, BOM, block drawing) are GaudiLabs' work and are included unchanged. Please support the original project and open science hardware at [gaudishop.ch](https://gaudishop.ch/).
 
-> **Status:** beta (`Spikey 0.0.Nb`), working towards **1.0.0**. Development happens on the `1.0.0` branch. `master` is GaudiLabs' original firmware (V1.02).
+> **Status:** **1.0.0**, the first stable release. **sqPCR** is planned for 1.1.0. `master` is GaudiLabs' original firmware (V1.02).
 
 > **Use at your own risk.** Spikey is an unofficial, hobbyist firmware, provided **without any warranty**. It isn't a medical or diagnostic device. See [Safety and disclaimer](#safety-and-disclaimer).
 
@@ -23,7 +23,9 @@ This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/
   - **PCR:** Init → n × [Denature → Annealing → Extension] → Final extension
   - **RT:** Incubation → Transcribe → Deactivate, one pass
 - **Touchdown PCR:** set a start and an end temperature on the Annealing bar, and the anneal temperature drops 1 °C per cycle until it reaches the end. The cycle count is the total, touchdown included. It can't be set lower than a full touchdown needs, and widening the touchdown raises it automatically.
-- **Room temperature ("RT") steps:** turn any temperature below 25 °C. The heater stays off and the step's timer starts immediately. Good for room-temperature incubations, which the fan alone can't hold reliably.
+- **Room temperature ("RT") steps:** turn a temperature down past 25 °C until it shows **RT**. The heater stays off and the step's timer starts immediately. Good for room-temperature incubations, which the fan alone can't hold reliably.
+  - **Two meanings of "RT":** in the editor, RT on a *temperature* means room temperature. **Run RT** and **RT Program** are the *reverse transcription* program. The default RT program starts with a room-temperature step, so you'll see both.
+  - **Use RT, not 25 °C,** for room-temperature steps. The block has no active cooling below room temperature, and a step's timer only starts once the block is within 0.5 °C of its target. In a room warmer than about 25 °C, a 25 °C step would wait indefinitely.
 - **Run screen:** cycle count (with "TD" during touchdown), step, target and block temperature, time left in the step, elapsed time, and **estimated time remaining**. The estimate learns this block's real heating and cooling rates.
 - **Done screen:** total time vs the estimate, this run's heating and cooling rates, then an **automatic cool-down** (fan for up to 60 s) and a **COMPLETE** banner.
 - **Safety cutoff:** heater off and fan on, with an error screen, if the temperature sensor fails ("SENSOR ERR"), the block overheats above 105 °C ("OVER TEMP"), or the heater runs flat out without warming the block ("NO HEATING").
@@ -97,7 +99,12 @@ It's finished but **switched off in 1.0 builds** and will ship in **1.1.0**. To 
 - **[arduino-cli](https://arduino.github.io/arduino-cli/) or the Arduino IDE**, with:
   - the **Arduino SAMD** and **Adafruit SAMD** board packages. Adafruit's needs this board manager URL: `https://adafruit.github.io/arduino-board-index/package_adafruit_index.json`
   - the **Adafruit GFX Library** and **Adafruit SSD1306** libraries
-- **`bossac`**, which comes with the Arduino SAMD package (e.g. `~/Library/Arduino15/packages/arduino/tools/bossac/1.7.0-arduino3/bossac` on macOS, `~/.arduino15/...` on Linux). It's used for the backup.
+- **`bossac`**, which comes with the Arduino SAMD package. It's used for the backup and restore. It isn't on your `PATH`, so use its full path (or add its folder to `PATH`):
+  - macOS: `~/Library/Arduino15/packages/arduino/tools/bossac/1.7.0-arduino3/bossac`
+  - Linux: `~/.arduino15/packages/arduino/tools/bossac/1.7.0-arduino3/bossac`
+  - Windows: `%LOCALAPPDATA%\Arduino15\packages\arduino\tools\bossac\1.7.0-arduino3\bossac.exe`
+
+  The commands below just say `bossac`.
 - **Recovery only (optional):** an SWD programmer (J-Link, Atmel-ICE or CMSIS-DAP) on header `J2`, to re-install the bootloader on a bricked board.
 
 One-time setup with arduino-cli:
@@ -115,21 +122,26 @@ Put the device into its bootloader by opening the serial port at 1200 baud:
 ```sh
 stty -f /dev/cu.usbmodem101 1200     # macOS  (Linux: stty -F /dev/ttyACM0 1200)
 ```
-If the port doesn't change, this Python one-liner (macOS/Linux) does the same thing:
+On **Windows** (Command Prompt), with your port number:
+```bat
+mode COM3: BAUD=1200 PARITY=N DATA=8 STOP=1
+```
+If that doesn't work, this Python one-liner (macOS/Linux) does the same thing:
 ```sh
 python3 -c "import os,termios;fd=os.open('/dev/cu.usbmodem101',os.O_RDWR|os.O_NOCTTY|os.O_NONBLOCK);a=termios.tcgetattr(fd);a[4]=a[5]=termios.B1200;termios.tcsetattr(fd,termios.TCSANOW,a);os.close(fd)"
 ```
-In bootloader mode the screen goes blank, and the USB ID changes to `239A:000B` (the port name usually stays the same).
+In bootloader mode the screen goes blank, and the USB ID changes to `239A:000B`. The port name usually stays the same on macOS and Linux; on Windows it may get a **new COM number** (check Device Manager → Ports).
 
 > **About "1200 baud":** this is only a signal, not the transfer speed. Opening and closing the port at 1200 baud tells the firmware to reboot into its bootloader. The PocketPCR uses native USB, so the baud rate is ignored and reads and writes run at full USB speed. A full backup takes about 10 s, and flashing plus verifying takes about 7 s.
 
-Then read the whole application area, 248 KB above the 8 KB bootloader. Read it twice and compare:
+Then read the whole application area, 248 KB above the 8 KB bootloader. Read it twice and compare. `--port` takes the port name: `cu.usbmodem101` on macOS, `ttyACM0` on Linux, `COM3` on Windows.
 ```sh
 bossac -U true --port=cu.usbmodem101 -r pocketpcr_backup.bin
 bossac -U true --port=cu.usbmodem101 -r verify.bin && cmp pocketpcr_backup.bin verify.bin && echo OK
 ```
+(On Windows, compare with `fc /b pocketpcr_backup.bin verify.bin`.)
 
-The file should be **253,952 bytes**. Keep it somewhere safe. The bootloader isn't included, but uploads never touch it. Afterwards, **unplug and replug** the device to leave the bootloader; a software reset sends it straight back in.
+The file should be **253,952 bytes**. Keep it somewhere safe. The bootloader isn't included, but uploads never touch it. You can go straight on to step 2 from here. If you don't, **unplug and replug** the device to leave the bootloader; a software reset sends it straight back in.
 
 Optional: `python3 tools/decode_stats.py pocketpcr_backup.bin` shows the ramp statistics saved by Spikey.
 
@@ -139,6 +151,7 @@ Optional: `python3 tools/decode_stats.py pocketpcr_backup.bin` shows the ramp st
 arduino-cli compile --fqbn adafruit:samd:adafruit_feather_m0 --upload -p /dev/cu.usbmodem101 \
   code/PocketPCR_V2_quite_dev_i_disp
 ```
+Use `-p /dev/ttyACM0` on Linux or `-p COM3` on Windows.
 
 The upload resets the device into the bootloader automatically. Wait for **"Verify successful"**. The device then restarts and shows the splash with the Spikey version.
 
@@ -182,7 +195,7 @@ Unplug and replug the device afterwards.
   - pause and resume events logged over USB serial
   - paused time left out of the run statistics
 
-### 1.0.0 (unreleased)
+### 1.0.0 (2026-11-07)
 
 First stable Spikey release. Compared with GaudiLabs' PocketPCR firmware V1.02:
 
@@ -190,7 +203,7 @@ First stable Spikey release. Compared with GaudiLabs' PocketPCR firmware V1.02:
 - **PCR and RT programs**, each with its own saved settings. RT is Incubation → Transcribe → Deactivate, one pass.
 - **Touchdown PCR** on the Annealing step: a start/end range on the bar, 1 °C per cycle. The cycle count is the total, kept at least as long as a full touchdown needs.
 - **Room temperature ("RT") steps:** heater off, and the timer starts immediately.
-- **Menus:** Main Menu (Run PCR / Run RT / Config >) and Config (PCR Program / RT Program / Debug / About / < Back), in a clean small-font style. Lists longer than 5 items scroll.
+- **Menus:** Main Menu (Run PCR / Run RT / Config >) and Config (PCR Program / RT Program / Debug / About / < Back), in a clean small-font style.
 - **Run screen:** cycle count with a touchdown marker, step, target and block temperature, step time, elapsed time and **estimated time remaining**.
 - **Time estimate** that learns this block's real heating and cooling rates for each step. Measured within about 2% on an empty block.
 - **Done screen** with total vs estimated time and this run's heating and cooling rates, plus an **automatic cool-down** and a **COMPLETE** banner.

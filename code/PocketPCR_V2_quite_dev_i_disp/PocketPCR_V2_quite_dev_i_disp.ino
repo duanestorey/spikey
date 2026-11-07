@@ -6,6 +6,11 @@ http://gaudi.ch/PocketPCR/
 
 https://github.com/GaudiLabs/PocketPCR
 
+Modified as "Spikey" by Duane Storey, 2026 (https://github.com/duanestorey/spikey):
+touchdown PCR, RT program, Room temperature steps, safety cutoffs, time estimate,
+run/Done screens, auto cool-down and more. See README.md for the full changelog.
+Modifications are licensed under the GNU GPL v3.0, the same as the original.
+
 */
 
 #include <math.h> 
@@ -16,7 +21,7 @@ https://github.com/GaudiLabs/PocketPCR
 
 #include <Fonts/FreeSans9pt7b.h>
 
-const char VersionString[] = "Spikey 0.0.8b";   // fork of GaudiLabs PocketPCR V1.02 2020
+const char VersionString[] = "Spikey 1.0.0";   // fork of GaudiLabs PocketPCR V1.02 2020
 #define SPLASH_MS 5000                         // how long the start-up splash is shown
 #define ENABLE_SQPCR 0        // 1 = include the sqPCR program (reading pauses). Held back until 1.1.0
 
@@ -483,6 +488,7 @@ case CASE_EditSettings:
     else                                                             // time
       {if (minuteMode)
        {if (counter<2) {minuteMode=false; counter=90;}
+        if (counter>99) counter=99;                               // "99m" is the widest that fits
        }  //Minute Mode
        else
        {
@@ -636,7 +642,9 @@ case CASE_Error:
     display.print("Heater off. Press btn");
     display.display();
 
-if (!digitalRead(butPin)) {waitRelease(); caseUX=CASE_Main; counter=0;}
+if (!digitalRead(butPin)) {waitRelease();
+  settings=my_flash_store.read(); sqsettings=sqpcr_store.read(); rtprog=rt_store.read();   // drop unsaved edits if the error hit mid-edit
+  caseUX=CASE_Main; counter=0;}
 
 break;
       
@@ -1136,8 +1144,11 @@ void printStats()
 {
   Serial.println("--- PocketPCR ramp stats ---");
   Serial.print("this run: "); Serial.print(typeName(runType)); Serial.print(runCompleted ? " done" : " stopped");
-  Serial.print("  active "); Serial.print(runTotalSecs); Serial.print("s  paused "); Serial.print(pausedMs/1000);
-  Serial.print("s  pauses="); Serial.println(pauseCount);
+  Serial.print("  active "); Serial.print(runTotalSecs); Serial.print("s");
+#if ENABLE_SQPCR
+  Serial.print("  paused "); Serial.print(pausedMs/1000); Serial.print("s  pauses="); Serial.print(pauseCount);
+#endif
+  Serial.println();
   Serial.print("runs started/completed: "); Serial.print(stats.runsStarted); Serial.print("/"); Serial.println(stats.runsCompleted);
   Serial.print("last run est/actual s: "); Serial.print(stats.lastEstSecs); Serial.print("/"); Serial.println(stats.lastActualSecs);
   Serial.print("overall heat/cool C/s: "); Serial.print(stats.heatRate,3); Serial.print("/"); Serial.print(stats.coolRate,3);
