@@ -69,7 +69,7 @@ This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/
 
 **sqPCR** (semi-quantitative PCR) is the same as PCR, plus pauses for manual fluorescence readings. It finds roughly where each sample's curve rises (within a cycle or two), using an external fluorometer. It isn't a replacement for a real-time qPCR instrument.
 
-It's finished but **switched off in 1.0 builds** and will ship in **1.1.0**. To try it now, set `#define ENABLE_SQPCR 1` near the top of the sketch and flash. "Run sqPCR" and "sqPCR Program" then appear in the menus (Config gets 6 items and scrolls).
+It's finished but **switched off in 1.0 builds** and will ship in **1.1.0**. It's already on in the 1.1.0 development builds (`Spikey 1.1.0bN`, on the `1.1.0` branch). To try it now, set `#define ENABLE_SQPCR 1` near the top of the sketch and flash. "Run sqPCR" and "sqPCR Program" then appear in the menus (Config gets 6 items and scrolls).
 
 - **Reading pauses:** the run pauses after Extension at chosen cycles and **holds at the Extension temperature** while you read the tubes. On the pause screen you choose **Resume [N cycles]** (change N during the run, e.g. to 1–2 once fluorescence starts rising), **Run to completion** (plateau found) or **Stop run**. The run screen shows **Next Pause:** as an estimated countdown to the next reading.
 - **Setting the pauses:** in Config → sqPCR Program. The cycles box reads e.g. `40x P1/6/3`: 40 cycles in total, a **baseline pause after cycle 1**, a **second pause after cycle 6**, then **every 3** cycles. Each part is its own item, and the pause numbers are 1–9. During a pause:
@@ -200,7 +200,9 @@ Unplug and replug the device afterwards.
 
 ## Changelog
 
-### 1.1.0 (planned)
+### 1.1.0 (in development)
+
+Betas: **1.1.0b1** switched sqPCR back on.
 
 **New**
 - **sqPCR program for manual fluorescence readings** (already in the code behind `ENABLE_SQPCR`):
