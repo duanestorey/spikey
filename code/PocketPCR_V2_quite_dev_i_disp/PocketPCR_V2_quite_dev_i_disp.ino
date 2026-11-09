@@ -21,9 +21,9 @@ Modifications are licensed under the GNU GPL v3.0, the same as the original.
 
 #include <Fonts/FreeSans9pt7b.h>
 
-const char VersionString[] = "Spikey 1.1.0b1";   // fork of GaudiLabs PocketPCR V1.02 2020
+const char VersionString[] = "Spikey 1.1b1";   // fork of GaudiLabs PocketPCR V1.02 2020
 #define SPLASH_MS 5000                         // how long the start-up splash is shown
-#define ENABLE_SQPCR 1        // 1 = include the sqPCR program (reading pauses). On for 1.1.0 (it was 0 for 1.0)
+#define ENABLE_SQPCR 1        // 1 = include the sqPCR program (reading pauses). On for 1.1 (it was 0 for 1.0)
 
 // These constants won't change. They're used to give names to the pins used:
 const int analogInPin = A2;  // Analog input pin that the temperature sensor is attached to

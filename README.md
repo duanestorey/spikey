@@ -9,11 +9,11 @@
 - run summaries
 - an automatic cool-down
 
-**Coming in 1.1.0:** **sqPCR** (semi-quantitative PCR), a PCR program with **reading pauses** for manual fluorescence readings. It's written but switched off in 1.0 builds; see [sqPCR (coming in 1.1.0)](#sqpcr-coming-in-110).
+**Coming in 1.1:** **sqPCR** (semi-quantitative PCR), a PCR program with **reading pauses** for manual fluorescence readings. It's written but switched off in 1.0 builds; see [sqPCR (coming in 1.1)](#sqpcr-coming-in-11).
 
 This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/PocketPCR). All the hardware design files (PCBs, BOM, block drawing) are GaudiLabs' work and are included unchanged. Please support the original project and open science hardware at [gaudishop.ch](https://gaudishop.ch/).
 
-> **Status:** **1.0.0**, the first stable release. **sqPCR** is planned for 1.1.0. `master` holds the latest Spikey release. GaudiLabs' original firmware (V1.02) is kept as the tag `gaudilabs-v1.02`.
+> **Status:** **1.0.0**, the first stable release. **sqPCR** is planned for 1.1. `master` holds the latest Spikey release. GaudiLabs' original firmware (V1.02) is kept as the tag `gaudilabs-v1.02`.
 
 > **Use at your own risk.** Spikey is an unofficial, hobbyist firmware, provided **without any warranty**. It isn't a medical or diagnostic device. See [Safety and disclaimer](#safety-and-disclaimer).
 
@@ -65,11 +65,11 @@ This repository is a fork of [GaudiLabs/PocketPCR](https://github.com/GaudiLabs/
 
 **RT:** Incubation Room 10 min → Transcribe 55 °C 20 min → Deactivate 85 °C 5 min.
 
-## sqPCR (coming in 1.1.0)
+## sqPCR (coming in 1.1)
 
 **sqPCR** (semi-quantitative PCR) is the same as PCR, plus pauses for manual fluorescence readings. It finds roughly where each sample's curve rises (within a cycle or two), using an external fluorometer. It isn't a replacement for a real-time qPCR instrument.
 
-It's finished but **switched off in 1.0 builds** and will ship in **1.1.0**. It's already on in the 1.1.0 development builds (`Spikey 1.1.0bN`, on the `1.1.0` branch). To try it now, set `#define ENABLE_SQPCR 1` near the top of the sketch and flash. "Run sqPCR" and "sqPCR Program" then appear in the menus (Config gets 6 items and scrolls).
+It's finished but **switched off in 1.0 builds** and will ship in **1.1**. It's already on in the 1.1 development builds (`Spikey 1.1bN`, on the `1.1` branch). To try it now, set `#define ENABLE_SQPCR 1` near the top of the sketch and flash. "Run sqPCR" and "sqPCR Program" then appear in the menus (Config gets 6 items and scrolls).
 
 - **Reading pauses:** the run pauses after Extension at chosen cycles and **holds at the Extension temperature** while you read the tubes. On the pause screen you choose **Resume [N cycles]** (change N during the run, e.g. to 1–2 once fluorescence starts rising), **Run to completion** (plateau found) or **Stop run**. The run screen shows **Next Pause:** as an estimated countdown to the next reading.
 - **Setting the pauses:** in Config → sqPCR Program. The cycles box reads e.g. `40x P1/6/3`: 40 cycles in total, a **baseline pause after cycle 1**, a **second pause after cycle 6**, then **every 3** cycles. Each part is its own item, and the pause numbers are 1–9. During a pause:
@@ -200,9 +200,9 @@ Unplug and replug the device afterwards.
 
 ## Changelog
 
-### 1.1.0 (in development)
+### 1.1 (in development)
 
-Betas: **1.1.0b1** switched sqPCR back on.
+Betas: **1.1b1** switched sqPCR back on.
 
 **New**
 - **sqPCR program for manual fluorescence readings** (already in the code behind `ENABLE_SQPCR`):
@@ -243,7 +243,7 @@ First stable Spikey release. Compared with GaudiLabs' PocketPCR firmware V1.02:
 
 | Version | Highlights |
 |---|---|
-| 0.0.8b | sqPCR switched off for 1.0 (build flag `ENABLE_SQPCR`, planned for 1.1.0); menus show PCR and RT only |
+| 0.0.8b | sqPCR switched off for 1.0 (build flag `ENABLE_SQPCR`, planned for 1.1); menus show PCR and RT only |
 | 0.0.7b | Config > About (shows the splash and version again); menus longer than 5 items scroll |
 | 0.0.6b | sqPCR program with manual reading pauses (Resume [N], Run to completion, Next Pause countdown; P1/6/3 schedule); 5-item Config menu; renamed to Spikey |
 | 0.0.5b | Default programs updated (PCR 95/94/63→55/72/72, 35 cycles; RT Room/55 °C 20 min/85 °C) |
